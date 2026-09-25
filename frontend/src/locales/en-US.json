@@ -269,7 +269,13 @@
       "failedPayments": "Failed payments",
       "aiCost": "AI cost",
       "aiCharged": "AI charged",
-      "aiMargin": "AI margin"
+      "aiMargin": "AI margin",
+      "usageByWorkspace": "Usage by workspace",
+      "workspace": "Workspace",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "cost": "Cost",
+      "usageEmpty": "No usage recorded yet."
     },
     "errors": {
       "time": "Time",

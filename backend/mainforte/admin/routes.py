@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import Numeric, func
 from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, require_superuser
@@ -32,10 +32,30 @@ def users(q: str = "", limit: int = Query(100, le=500), db: Session = Depends(ge
 
 @router.get("/finances")
 def finances(db: Session = Depends(get_db)):
-    # P3 fills these from the Stripe reconcile + ai-proxy usage tables.
+    # P3 fills mrr/subscriptions/charged from the Stripe reconcile job; ai_cost_usd and
+    # usage_by_workspace are real, summed from billing.usage.recorded events.
     plan_counts = dict(db.query(Workspace.plan, func.count()).group_by(Workspace.plan).all())
-    return {"mrr_cents": 0, "active_subscriptions": 0, "failed_payments": 0, "ai_cost_usd": 0.0, "ai_charged_usd": 0.0,
-            "workspaces_by_plan": plan_counts}
+
+    cost_expr = func.sum(func.cast(Event.payload["cost_usd"].astext, Numeric))
+    in_tok_expr = func.sum(func.cast(Event.payload["input_tokens"].astext, Numeric))
+    out_tok_expr = func.sum(func.cast(Event.payload["output_tokens"].astext, Numeric))
+    usage_rows = (
+        db.query(Event.ws_id, Workspace.name, in_tok_expr, out_tok_expr, cost_expr)
+        .join(Workspace, Workspace.id == Event.ws_id)
+        .filter(Event.type == "billing.usage.recorded")
+        .group_by(Event.ws_id, Workspace.name)
+        .order_by(cost_expr.desc())
+        .all()
+    )
+    usage_by_workspace = [
+        {"ws_id": ws_id, "ws_name": ws_name, "input_tokens": int(in_tok or 0), "output_tokens": int(out_tok or 0),
+         "cost_usd": float(cost or 0.0)}
+        for ws_id, ws_name, in_tok, out_tok, cost in usage_rows
+    ]
+    ai_cost_usd = sum(row["cost_usd"] for row in usage_by_workspace)
+
+    return {"mrr_cents": 0, "active_subscriptions": 0, "failed_payments": 0, "ai_cost_usd": ai_cost_usd,
+            "ai_charged_usd": 0.0, "workspaces_by_plan": plan_counts, "usage_by_workspace": usage_by_workspace}
 
 
 @router.get("/errors")

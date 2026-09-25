@@ -98,9 +98,14 @@ def _tenant_headers(api_key: str) -> dict[str, str]:
 
 async def stream_reply(
     *, api_key: str, model: str, system: str, messages: list[dict[str, Any]], max_tokens: int = 2048,
+    usage_sink: dict[str, int] | None = None,
 ) -> AsyncIterator[str]:
     """Yields text deltas from POST /v1/messages (Anthropic Messages shape, SSE). Raises AiProxyError
-    on non-2xx, with retry_after populated for 429s so the caller can back off."""
+    on non-2xx, with retry_after populated for 429s so the caller can back off.
+
+    If `usage_sink` is given, it is mutated in place with {"input_tokens", "output_tokens"} once
+    known (input from message_start, output from message_delta) — a generator can't also return a
+    value, and this avoids changing the yield type for the two existing callers."""
     url = _ai_root() + "/v1/messages"
     body = {"model": model, "system": system, "messages": messages, "max_tokens": max_tokens, "stream": True}
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0)) as c:
@@ -128,6 +133,16 @@ async def stream_reply(
                     text = delta.get("text")
                     if text:
                         yield text
+                elif evt.get("type") == "message_start":
+                    if usage_sink is not None:
+                        usage = (evt.get("message") or {}).get("usage") or {}
+                        if "input_tokens" in usage:
+                            usage_sink["input_tokens"] = usage["input_tokens"]
+                elif evt.get("type") == "message_delta":
+                    if usage_sink is not None:
+                        usage = evt.get("usage") or {}
+                        if "output_tokens" in usage:
+                            usage_sink["output_tokens"] = usage["output_tokens"]
                 elif evt.get("type") == "message_stop":
                     return
                 elif evt.get("type") == "error":
@@ -135,9 +150,10 @@ async def stream_reply(
 
 
 async def complete(*, api_key: str, model: str, system: str, messages: list[dict[str, Any]],
-                    max_tokens: int = 300) -> str:
+                    max_tokens: int = 300) -> tuple[str, dict[str, int]]:
     """Non-streaming call for small, cheap, single-shot completions (classification, verification) —
-    callers that don't need token-by-token deltas. Same endpoint as stream_reply with stream=False."""
+    callers that don't need token-by-token deltas. Same endpoint as stream_reply with stream=False.
+    Returns (text, usage) where usage is {"input_tokens", "output_tokens"} (0 if absent)."""
     url = _ai_root() + "/v1/messages"
     body = {"model": model, "system": system, "messages": messages, "max_tokens": max_tokens, "stream": False}
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=60.0)) as c:
@@ -151,4 +167,7 @@ async def complete(*, api_key: str, model: str, system: str, messages: list[dict
             )
         d = r.json()
         blocks = d.get("content") or []
-        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+        raw_usage = d.get("usage") or {}
+        usage = {"input_tokens": raw_usage.get("input_tokens", 0), "output_tokens": raw_usage.get("output_tokens", 0)}
+        return text, usage

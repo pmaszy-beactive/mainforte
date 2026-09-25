@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
+from mainforte.aiproxy.pricing import estimate_cost_usd
 from mainforte.db.models import Persona, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit, emit_ephemeral
@@ -77,6 +78,7 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
     full = ""
     error: str | None = None
     canceled = False
+    usage_sink: dict[str, int] = {}
     try:
         if api_key is None:
             full = _fallback_text(persona, user_text)
@@ -88,6 +90,7 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
         else:
             async for chunk in aiproxy.stream_reply(
                 api_key=api_key, model=persona.model, system=system, messages=history, max_tokens=MAX_REPLY_TOKENS,
+                usage_sink=usage_sink,
             ):
                 if _is_canceled(ws_id, thread_id, correlation_id):
                     canceled = True
@@ -112,6 +115,15 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
         else:
             emit(db, "persona.reply.ended", ws_id=ws_id, actor=("persona", persona.slug),
                  correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id, "text": full})
+
+        if usage_sink.get("input_tokens") or usage_sink.get("output_tokens"):
+            in_tok = usage_sink.get("input_tokens", 0)
+            out_tok = usage_sink.get("output_tokens", 0)
+            emit(db, "billing.usage.recorded", ws_id=ws_id, actor=("persona", persona.slug),
+                 correlation_id=correlation_id,
+                 payload={"thread_id": thread_id, "persona_id": persona.id, "model": persona.model,
+                          "input_tokens": in_tok, "output_tokens": out_tok,
+                          "cost_usd": estimate_cost_usd(persona.model, in_tok, out_tok)})
 
 
 def route_message(event: dict[str, Any]) -> None:

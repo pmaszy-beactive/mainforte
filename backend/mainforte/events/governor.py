@@ -15,6 +15,7 @@ from typing import Any
 
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
+from mainforte.aiproxy.pricing import estimate_cost_usd
 from mainforte.db.models import Event, Memory, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit
@@ -56,20 +57,35 @@ def _parse_claims(raw: str) -> list[dict[str, str]]:
     return out
 
 
-async def _extract_claims(*, api_key: str, reply_text: str) -> list[dict[str, str]]:
-    raw = await aiproxy.complete(
+def _record_usage(*, ws_id: str, correlation_id: str | None, purpose: str, usage: dict[str, int]) -> None:
+    in_tok = usage.get("input_tokens", 0)
+    out_tok = usage.get("output_tokens", 0)
+    if not in_tok and not out_tok:
+        return
+    with db_session() as db:
+        emit(db, "billing.usage.recorded", ws_id=ws_id, actor=("system", None), correlation_id=correlation_id,
+             payload={"purpose": purpose, "model": CLAIM_MODEL, "input_tokens": in_tok, "output_tokens": out_tok,
+                      "cost_usd": estimate_cost_usd(CLAIM_MODEL, in_tok, out_tok)})
+
+
+async def _extract_claims(*, api_key: str, reply_text: str, ws_id: str,
+                           correlation_id: str | None) -> list[dict[str, str]]:
+    raw, usage = await aiproxy.complete(
         api_key=api_key, model=CLAIM_MODEL, system=EXTRACT_SYSTEM,
         messages=[{"role": "user", "content": reply_text}], max_tokens=400,
     )
+    _record_usage(ws_id=ws_id, correlation_id=correlation_id, purpose="governor.extract", usage=usage)
     return _parse_claims(raw)
 
 
-async def _verify_fact_llm(*, api_key: str, claim_text: str, context: str) -> tuple[str, str]:
-    raw = await aiproxy.complete(
+async def _verify_fact_llm(*, api_key: str, claim_text: str, context: str, ws_id: str,
+                            correlation_id: str | None) -> tuple[str, str]:
+    raw, usage = await aiproxy.complete(
         api_key=api_key, model=CLAIM_MODEL, system=VERIFY_SYSTEM,
         messages=[{"role": "user", "content": f"Claim: {claim_text}\n\nContext:\n{context}"}],
         max_tokens=200,
     )
+    _record_usage(ws_id=ws_id, correlation_id=correlation_id, purpose="governor.verify", usage=usage)
     try:
         d = json.loads(raw)
     except json.JSONDecodeError:
@@ -114,7 +130,8 @@ async def _govern(*, ws_id: str, thread_id: str | None, correlation_id: str | No
         context = _deterministic_context(db, ws_id=ws_id, thread_id=thread_id)
 
     try:
-        claims = await _extract_claims(api_key=api_key, reply_text=reply_text)
+        claims = await _extract_claims(api_key=api_key, reply_text=reply_text, ws_id=ws_id,
+                                        correlation_id=correlation_id)
     except aiproxy.AiProxyError:
         log.exception("governor claim extraction failed ws=%s corr=%s", ws_id, correlation_id)
         return
@@ -151,7 +168,8 @@ async def _govern(*, ws_id: str, thread_id: str | None, correlation_id: str | No
                 continue
 
             try:
-                verdict, reason = await _verify_fact_llm(api_key=api_key, claim_text=claim["text"], context=context)
+                verdict, reason = await _verify_fact_llm(api_key=api_key, claim_text=claim["text"], context=context,
+                                                          ws_id=ws_id, correlation_id=correlation_id)
             except aiproxy.AiProxyError:
                 log.exception("governor fact verification failed ws=%s corr=%s", ws_id, correlation_id)
                 verdict, reason = "UNKNOWN", "verifier call failed"

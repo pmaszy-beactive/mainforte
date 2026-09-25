@@ -269,7 +269,13 @@
       "failedPayments": "Paiements échoués",
       "aiCost": "Coût IA",
       "aiCharged": "IA facturée",
-      "aiMargin": "Marge IA"
+      "aiMargin": "Marge IA",
+      "usageByWorkspace": "Utilisation par espace de travail",
+      "workspace": "Espace de travail",
+      "inputTokens": "Jetons d'entrée",
+      "outputTokens": "Jetons de sortie",
+      "cost": "Coût",
+      "usageEmpty": "Aucune utilisation enregistrée pour le moment."
     },
     "errors": {
       "time": "Heure",

@@ -91,12 +91,20 @@ export interface AdminUser {
   created_at: string;
   plan: string | null;
 }
+export interface AdminUsageByWorkspace {
+  ws_id: string;
+  ws_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+}
 export interface AdminFinances {
   mrr_cents: number;
   active_subscriptions: number;
   failed_payments: number;
   ai_cost_usd: number;
   ai_charged_usd: number;
+  usage_by_workspace: AdminUsageByWorkspace[];
 }
 export interface AdminError {
   id: string;
