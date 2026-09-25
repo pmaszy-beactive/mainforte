@@ -1,0 +1,26 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.swp
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# misc
+.DS_Store
+*.log
+/work/
+.data/
+celerybeat-schedule.db

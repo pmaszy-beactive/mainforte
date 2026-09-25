@@ -1,0 +1,311 @@
+{
+  "locales": {
+    "en-US": "English",
+    "fr-CA": "Français (Canada)"
+  },
+  "common": {
+    "home": "Home",
+    "error": "Something went wrong",
+    "empty": "Nothing here yet.",
+    "loadFailed": "Failed to load",
+    "save": "Save",
+    "saved": "Saved",
+    "comingSoon": "More settings are coming soon."
+  },
+  "nav": {
+    "why": "Why",
+    "pricing": "Pricing",
+    "openApp": "Open app",
+    "login": "Log in",
+    "getStarted": "Get started"
+  },
+  "hero": {
+    "badge": "Autonomous agents, with personalities",
+    "title1": "Your AI staff.",
+    "title2": "They actually do the work.",
+    "lead": "Give them a goal. They browse, research, build, and report back with a dashboard, only interrupting you when they need a decision.",
+    "cta": "Hire your first agent",
+    "seePricing": "See pricing",
+    "userLine": "Great. Reed, keep it under 80k miles.",
+    "staff": {
+      "jeeves": {
+        "name": "Jeeves",
+        "role": "Concierge",
+        "line": "Booked the dentist, moved Thursday. Anything else?"
+      },
+      "margo": {
+        "name": "Margo",
+        "role": "CFO",
+        "line": "We're $140 over on subscriptions. I found three to cut."
+      },
+      "reed": {
+        "name": "Reed",
+        "role": "Executor",
+        "line": "Car search done: 12 listings under $5k, dashboard is up."
+      }
+    }
+  },
+  "benefits": {
+    "title": "Built to finish, not to chat.",
+    "items": {
+      "browse": {
+        "title": "It browses for you",
+        "body": "Each agent gets its own browser. Forms, comparisons, bookings, price tracking: real web chores, done in the background."
+      },
+      "team": {
+        "title": "A team, not a bot",
+        "body": "Invite a Concierge, a CFO, a PM. They talk to each other, argue a little, and only the right one answers you."
+      },
+      "widgets": {
+        "title": "Results as widgets",
+        "body": "Outputs become live, named dashboards in your sidebar. Ask once, check anytime, turn it off when you're done."
+      }
+    }
+  },
+  "pricing": {
+    "title": "Simple plans. Cancel anytime.",
+    "subtitle": "Good, better, best. Pick what fits, upgrade when they earn it.",
+    "popular": "Most popular",
+    "perMonth": "/month",
+    "choose": "Choose {{name}}",
+    "tiers": {
+      "good": {
+        "name": "Good",
+        "blurb": "One agent, one goal at a time.",
+        "features": [
+          "1 agent",
+          "Browser tasks",
+          "Daily check-ins",
+          "3 widgets"
+        ]
+      },
+      "better": {
+        "name": "Better",
+        "blurb": "A small team for your household.",
+        "features": [
+          "3 agents",
+          "Global channel",
+          "Scheduled tasks",
+          "Unlimited widgets",
+          "Family workspace"
+        ]
+      },
+      "best": {
+        "name": "Best",
+        "blurb": "The full staff, priority queue.",
+        "features": [
+          "Unlimited agents",
+          "Priority workers",
+          "Gmail & Calendar",
+          "Meeting attendance",
+          "Early integrations"
+        ]
+      }
+    }
+  },
+  "footer": {
+    "copy": "© {{year}} Mainforte. AI staff for real life."
+  },
+  "auth": {
+    "google": "Continue with Google",
+    "googleSignup": "Sign up with Google",
+    "or": "or",
+    "backToLogin": "Back to log in",
+    "fields": {
+      "name": "Name",
+      "email": "Email",
+      "password": "Password",
+      "newPassword": "New password",
+      "confirm": "Confirm"
+    },
+    "signup": {
+      "title": "Create your workspace",
+      "subtitle": "Your first agent is waiting.",
+      "subtitlePlan": "Starting on the {{plan}} plan.",
+      "haveAccount": "Already have an account?",
+      "submit": "Create account"
+    },
+    "login": {
+      "title": "Log in",
+      "welcome": "Welcome back",
+      "subtitle": "Your staff kept working while you were gone.",
+      "newHere": "New here?",
+      "createAccount": "Create an account",
+      "submit": "Log in",
+      "magic": "Email me a magic link",
+      "magicSent": "Magic link sent. Check your inbox.",
+      "forgot": "Forgot password?"
+    },
+    "forgot": {
+      "title": "Reset your password",
+      "subtitle": "We'll email you a link.",
+      "sent": "If an account exists for {{email}}, a reset link is on its way.",
+      "submit": "Send reset link"
+    },
+    "reset": {
+      "title": "Choose a new password",
+      "missingToken": "This reset link is missing its token. Request a new one.",
+      "done": "Password updated.",
+      "mismatch": "Passwords don't match",
+      "submit": "Update password"
+    },
+    "magic": {
+      "title": "Signing you in",
+      "missingToken": "This link is missing its token.",
+      "verifying": "Verifying your magic link…"
+    },
+    "oauth": {
+      "title": "Finishing sign-in",
+      "noToken": "No token was returned by the sign-in provider.",
+      "wait": "One moment…"
+    }
+  },
+  "impersonation": {
+    "banner": "Impersonating <b>{{email}}</b> (as {{by}}) —",
+    "stop": "stop"
+  },
+  "app": {
+    "rail": {
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar"
+    },
+    "widgets": {
+      "title": "Widgets",
+      "empty": "No widgets yet",
+      "emptyHint": "Results your staff produce show up here."
+    },
+    "staff": {
+      "title": "Your staff",
+      "global": "Global channel",
+      "invite": "Invite",
+      "empty": "No staff yet",
+      "emptyHint": "Invite a Concierge to get started."
+    },
+    "profile": {
+      "billing": "Billing",
+      "settings": "Settings",
+      "logout": "Log out",
+      "language": "Language",
+      "admin": "Admin"
+    }
+  },
+  "chat": {
+    "empty": "Say hello. Your staff are listening on the global channel.",
+    "noWorkspace": "No workspace yet. One will be created for you shortly.",
+    "placeholder": "Message your staff… (Enter to send, Shift+Enter for a new line)",
+    "send": "Send",
+    "newChat": "New chat",
+    "history": "History",
+    "historyEmpty": "No past chats yet.",
+    "viewPane": "View",
+    "viewPaneTitle": "View pane",
+    "viewPaneHint": "Live browser and task views will appear here.",
+    "activity": "Activity",
+    "activityEmpty": "No activity yet.",
+    "status": {
+      "open": "Live",
+      "connecting": "Connecting…",
+      "reconnecting": "Reconnecting…",
+      "closed": "Offline",
+      "offline": "Offline",
+      "reconnectingN": "Reconnecting… (attempt {{n}})"
+    },
+    "sending": "sending…",
+    "sent": "sent",
+    "failed": "failed",
+    "retry": "retry",
+    "discard": "discard",
+    "stop": "Stop",
+    "canceled": "canceled",
+    "attach": "Attach a file",
+    "removeAttachment": "Remove attachment",
+    "dropHint": "Drop files to attach",
+    "uploading": "Uploading… {{pct}}%",
+    "uploadFailed": "Upload failed",
+    "uploadRetry": "Retry upload",
+    "tooLarge": "Too large (max 25 MB)",
+    "attachmentLost": "Attachment lost after reload",
+    "closeLightbox": "Close"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Your account.",
+    "name": "Name",
+    "email": "Email",
+    "language": "Language",
+    "timezone": "Timezone",
+    "workspaces": "Workspaces"
+  },
+  "billing": {
+    "title": "Billing",
+    "subtitle": "Plan, card and usage.",
+    "choose": "Choose",
+    "placeholder": "Card, invoices and usage will appear here once billing is enabled."
+  },
+  "admin": {
+    "badge": "Admin",
+    "backToApp": "Back to app",
+    "tabs": {
+      "users": "Users",
+      "finances": "Finances",
+      "errors": "API Errors",
+      "jobs": "Jobs",
+      "workers": "Workers",
+      "events": "Events"
+    },
+    "users": {
+      "email": "Email",
+      "name": "Name",
+      "role": "Role",
+      "plan": "Plan",
+      "created": "Created",
+      "impersonate": "Impersonate",
+      "search": "Search users…",
+      "empty": "No users match."
+    },
+    "finances": {
+      "mrr": "MRR",
+      "activeSubs": "Active subscriptions",
+      "failedPayments": "Failed payments",
+      "aiCost": "AI cost",
+      "aiCharged": "AI charged",
+      "aiMargin": "AI margin"
+    },
+    "errors": {
+      "time": "Time",
+      "type": "Type",
+      "message": "Message",
+      "path": "Path",
+      "user": "User",
+      "empty": "No errors. Nice."
+    },
+    "jobs": {
+      "job": "Job",
+      "queue": "Queue",
+      "workspace": "Workspace",
+      "started": "Started",
+      "running": "Running",
+      "noQueues": "No queues reported.",
+      "empty": "Nothing running."
+    },
+    "workers": {
+      "status": "Status",
+      "node": "Node",
+      "heartbeat": "Heartbeat",
+      "currentJob": "Current job",
+      "desired": "Desired count",
+      "live": "Live",
+      "empty": "No workers."
+    },
+    "events": {
+      "time": "Time",
+      "type": "Type",
+      "actor": "Actor",
+      "workspace": "Workspace",
+      "payload": "Payload",
+      "filterType": "Filter by type…",
+      "filterWorkspace": "Workspace id…",
+      "empty": "No events."
+    }
+  }
+}

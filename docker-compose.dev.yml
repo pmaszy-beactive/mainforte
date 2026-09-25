@@ -1,0 +1,22 @@
+# Local dev infra only. `docker compose -f docker-compose.dev.yml up -d`
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: mainforte
+      POSTGRES_PASSWORD: mainforte
+      POSTGRES_DB: mainforte
+    ports: ["5439:5432"]
+    volumes: ["mf-pg:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7
+    ports: ["6390:6379"]
+  rabbit:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: mainforte
+      RABBITMQ_DEFAULT_PASS: mainforte
+      RABBITMQ_DEFAULT_VHOST: mainforte
+    ports: ["5679:5672", "15679:15672"]
+volumes:
+  mf-pg:

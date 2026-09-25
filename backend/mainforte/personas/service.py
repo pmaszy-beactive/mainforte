@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from mainforte.db.models import Persona
+from mainforte.events import emit
+from mainforte.personas import catalog
+
+
+def seed_defaults(db: Session, *, ws_id: str, actor: tuple[str, str | None]) -> list[Persona]:
+    """Called once when a workspace is created. Adds the always-on personas (Concierge)."""
+    created = []
+    for slug in catalog.DEFAULT_ON_CREATE:
+        created.append(invite(db, ws_id=ws_id, slug=slug, actor=actor))
+    return created
+
+
+def invite(db: Session, *, ws_id: str, slug: str, actor: tuple[str, str | None], name: str | None = None) -> Persona:
+    arche = catalog.get(slug)
+    if arche is None:
+        raise ValueError(f"unknown persona archetype {slug!r}")
+    existing = db.query(Persona).filter_by(ws_id=ws_id, slug=slug).one_or_none()
+    if existing:
+        if existing.status == "removed":
+            existing.status = "active"
+            emit(db, "persona.invited", ws_id=ws_id, actor=actor, payload={"persona_id": existing.id, "slug": slug})
+        return existing
+    p = Persona(ws_id=ws_id, slug=slug, name=name or arche.default_name, model=arche.default_model)
+    db.add(p)
+    db.flush()
+    emit(db, "persona.invited", ws_id=ws_id, actor=actor, payload={"persona_id": p.id, "slug": slug, "name": p.name})
+    return p
+
+
+def rename(db: Session, *, persona: Persona, name: str, actor: tuple[str, str | None]) -> Persona:
+    old = persona.name
+    persona.name = name
+    emit(db, "persona.renamed", ws_id=persona.ws_id, actor=actor,
+         payload={"persona_id": persona.id, "old_name": old, "new_name": name})
+    return persona
+
+
+def remove(db: Session, *, persona: Persona, actor: tuple[str, str | None]) -> None:
+    persona.status = "removed"
+    emit(db, "persona.removed", ws_id=persona.ws_id, actor=actor, payload={"persona_id": persona.id, "slug": persona.slug})
+
+
+def list_active(db: Session, *, ws_id: str) -> list[Persona]:
+    return db.query(Persona).filter_by(ws_id=ws_id, status="active").order_by(Persona.created_at).all()
+
+
+def public(p: Persona) -> dict:
+    arche = catalog.get(p.slug)
+    return {
+        "id": p.id, "slug": p.slug, "name": p.name, "role": arche.role if arche else "",
+        "status": p.status, "model": p.model,
+    }

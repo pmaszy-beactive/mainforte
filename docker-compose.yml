@@ -1,0 +1,10 @@
+# Build-only compose (backbone deploy.sh uses it to build images; runtime config is backbone's).
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker

@@ -1,0 +1,311 @@
+{
+  "locales": {
+    "en-US": "English",
+    "fr-CA": "Français (Canada)"
+  },
+  "common": {
+    "home": "Accueil",
+    "error": "Une erreur est survenue",
+    "empty": "Rien pour l'instant.",
+    "loadFailed": "Échec du chargement",
+    "save": "Enregistrer",
+    "saved": "Enregistré",
+    "comingSoon": "D'autres réglages arrivent bientôt."
+  },
+  "nav": {
+    "why": "Pourquoi",
+    "pricing": "Tarifs",
+    "openApp": "Ouvrir l'appli",
+    "login": "Se connecter",
+    "getStarted": "Commencer"
+  },
+  "hero": {
+    "badge": "Des agents autonomes, avec de la personnalité",
+    "title1": "Votre personnel IA.",
+    "title2": "Il fait vraiment le travail.",
+    "lead": "Donnez-lui un objectif. Il navigue, fait des recherches, construit et vous revient avec un tableau de bord, en ne vous dérangeant que pour une décision.",
+    "cta": "Embauchez votre premier agent",
+    "seePricing": "Voir les tarifs",
+    "userLine": "Parfait. Reed, reste sous 130 000 km.",
+    "staff": {
+      "jeeves": {
+        "name": "Jeeves",
+        "role": "Concierge",
+        "line": "Dentiste réservé, déplacé à jeudi. Autre chose?"
+      },
+      "margo": {
+        "name": "Margo",
+        "role": "Directrice financière",
+        "line": "On dépasse de 140 $ en abonnements. J'en ai trouvé trois à couper."
+      },
+      "reed": {
+        "name": "Reed",
+        "role": "Exécutant",
+        "line": "Recherche d'auto terminée : 12 annonces sous 5 000 $, le tableau de bord est prêt."
+      }
+    }
+  },
+  "benefits": {
+    "title": "Conçu pour finir, pas pour clavarder.",
+    "items": {
+      "browse": {
+        "title": "Il navigue pour vous",
+        "body": "Chaque agent a son propre navigateur. Formulaires, comparaisons, réservations, suivi des prix : de vraies corvées Web, faites en arrière-plan."
+      },
+      "team": {
+        "title": "Une équipe, pas un robot",
+        "body": "Invitez un concierge, une directrice financière, un chef de projet. Ils se parlent, s'obstinent un peu, et seul le bon vous répond."
+      },
+      "widgets": {
+        "title": "Des résultats en widgets",
+        "body": "Les résultats deviennent des tableaux de bord vivants et nommés dans votre barre latérale. Demandez une fois, consultez quand vous voulez, désactivez quand c'est fini."
+      }
+    }
+  },
+  "pricing": {
+    "title": "Des forfaits simples. Annulez n'importe quand.",
+    "subtitle": "Bon, meilleur, optimal. Choisissez ce qui vous convient, montez de niveau quand ils le méritent.",
+    "popular": "Le plus populaire",
+    "perMonth": "/mois",
+    "choose": "Choisir {{name}}",
+    "tiers": {
+      "good": {
+        "name": "Bon",
+        "blurb": "Un agent, un objectif à la fois.",
+        "features": [
+          "1 agent",
+          "Tâches dans le navigateur",
+          "Bilans quotidiens",
+          "3 widgets"
+        ]
+      },
+      "better": {
+        "name": "Meilleur",
+        "blurb": "Une petite équipe pour votre foyer.",
+        "features": [
+          "3 agents",
+          "Canal global",
+          "Tâches planifiées",
+          "Widgets illimités",
+          "Espace de travail familial"
+        ]
+      },
+      "best": {
+        "name": "Optimal",
+        "blurb": "Tout le personnel, file prioritaire.",
+        "features": [
+          "Agents illimités",
+          "Travailleurs prioritaires",
+          "Gmail et Agenda",
+          "Présence aux réunions",
+          "Intégrations en avant-première"
+        ]
+      }
+    }
+  },
+  "footer": {
+    "copy": "© {{year}} Mainforte. Du personnel IA pour la vraie vie."
+  },
+  "auth": {
+    "google": "Continuer avec Google",
+    "googleSignup": "S'inscrire avec Google",
+    "or": "ou",
+    "backToLogin": "Retour à la connexion",
+    "fields": {
+      "name": "Nom",
+      "email": "Courriel",
+      "password": "Mot de passe",
+      "newPassword": "Nouveau mot de passe",
+      "confirm": "Confirmer"
+    },
+    "signup": {
+      "title": "Créez votre espace de travail",
+      "subtitle": "Votre premier agent vous attend.",
+      "subtitlePlan": "Vous commencez avec le forfait {{plan}}.",
+      "haveAccount": "Vous avez déjà un compte?",
+      "submit": "Créer un compte"
+    },
+    "login": {
+      "title": "Se connecter",
+      "welcome": "Bon retour",
+      "subtitle": "Votre personnel a continué à travailler pendant votre absence.",
+      "newHere": "Nouveau ici?",
+      "createAccount": "Créer un compte",
+      "submit": "Se connecter",
+      "magic": "M'envoyer un lien magique par courriel",
+      "magicSent": "Lien magique envoyé. Vérifiez votre boîte de réception.",
+      "forgot": "Mot de passe oublié?"
+    },
+    "forgot": {
+      "title": "Réinitialiser votre mot de passe",
+      "subtitle": "Nous vous enverrons un lien par courriel.",
+      "sent": "Si un compte existe pour {{email}}, un lien de réinitialisation est en route.",
+      "submit": "Envoyer le lien"
+    },
+    "reset": {
+      "title": "Choisissez un nouveau mot de passe",
+      "missingToken": "Ce lien de réinitialisation n'a pas de jeton. Demandez-en un nouveau.",
+      "done": "Mot de passe mis à jour.",
+      "mismatch": "Les mots de passe ne correspondent pas",
+      "submit": "Mettre à jour le mot de passe"
+    },
+    "magic": {
+      "title": "Connexion en cours",
+      "missingToken": "Ce lien n'a pas de jeton.",
+      "verifying": "Vérification de votre lien magique…"
+    },
+    "oauth": {
+      "title": "Finalisation de la connexion",
+      "noToken": "Le fournisseur de connexion n'a retourné aucun jeton.",
+      "wait": "Un instant…"
+    }
+  },
+  "impersonation": {
+    "banner": "Vous incarnez <b>{{email}}</b> (en tant que {{by}}) —",
+    "stop": "arrêter"
+  },
+  "app": {
+    "rail": {
+      "collapse": "Réduire la barre latérale",
+      "expand": "Agrandir la barre latérale"
+    },
+    "widgets": {
+      "title": "Widgets",
+      "empty": "Aucun widget pour l'instant",
+      "emptyHint": "Les résultats produits par votre personnel apparaîtront ici."
+    },
+    "staff": {
+      "title": "Votre personnel",
+      "global": "Canal global",
+      "invite": "Inviter",
+      "empty": "Aucun personnel pour l'instant",
+      "emptyHint": "Invitez un concierge pour commencer."
+    },
+    "profile": {
+      "billing": "Facturation",
+      "settings": "Réglages",
+      "logout": "Se déconnecter",
+      "language": "Langue",
+      "admin": "Admin"
+    }
+  },
+  "chat": {
+    "empty": "Dites bonjour. Votre personnel écoute sur le canal global.",
+    "noWorkspace": "Aucun espace de travail pour l'instant. Un sera créé pour vous sous peu.",
+    "placeholder": "Écrivez à votre personnel… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)",
+    "send": "Envoyer",
+    "newChat": "Nouveau clavardage",
+    "history": "Historique",
+    "historyEmpty": "Aucun clavardage précédent.",
+    "viewPane": "Vue",
+    "viewPaneTitle": "Volet de visualisation",
+    "viewPaneHint": "Le navigateur en direct et les vues de tâches apparaîtront ici.",
+    "activity": "Activité",
+    "activityEmpty": "Aucune activité pour l'instant.",
+    "status": {
+      "open": "En direct",
+      "connecting": "Connexion…",
+      "reconnecting": "Reconnexion…",
+      "closed": "Hors ligne",
+      "offline": "Hors ligne",
+      "reconnectingN": "Reconnexion… (tentative {{n}})"
+    },
+    "sending": "envoi…",
+    "sent": "envoyé",
+    "failed": "échec",
+    "retry": "réessayer",
+    "discard": "supprimer",
+    "stop": "Arrêter",
+    "canceled": "annulé",
+    "attach": "Joindre un fichier",
+    "removeAttachment": "Retirer la pièce jointe",
+    "dropHint": "Déposez des fichiers pour les joindre",
+    "uploading": "Téléversement… {{pct}} %",
+    "uploadFailed": "Échec du téléversement",
+    "uploadRetry": "Réessayer le téléversement",
+    "tooLarge": "Trop volumineux (max 25 Mo)",
+    "attachmentLost": "Pièce jointe perdue après le rechargement",
+    "closeLightbox": "Fermer"
+  },
+  "settings": {
+    "title": "Réglages",
+    "subtitle": "Votre compte.",
+    "name": "Nom",
+    "email": "Courriel",
+    "language": "Langue",
+    "timezone": "Fuseau horaire",
+    "workspaces": "Espaces de travail"
+  },
+  "billing": {
+    "title": "Facturation",
+    "subtitle": "Forfait, carte et utilisation.",
+    "choose": "Choisir",
+    "placeholder": "La carte, les factures et l'utilisation apparaîtront ici une fois la facturation activée."
+  },
+  "admin": {
+    "badge": "Admin",
+    "backToApp": "Retour à l'appli",
+    "tabs": {
+      "users": "Utilisateurs",
+      "finances": "Finances",
+      "errors": "Erreurs API",
+      "jobs": "Tâches",
+      "workers": "Travailleurs",
+      "events": "Événements"
+    },
+    "users": {
+      "email": "Courriel",
+      "name": "Nom",
+      "role": "Rôle",
+      "plan": "Forfait",
+      "created": "Créé le",
+      "impersonate": "Incarner",
+      "search": "Rechercher des utilisateurs…",
+      "empty": "Aucun utilisateur ne correspond."
+    },
+    "finances": {
+      "mrr": "RMR",
+      "activeSubs": "Abonnements actifs",
+      "failedPayments": "Paiements échoués",
+      "aiCost": "Coût IA",
+      "aiCharged": "IA facturée",
+      "aiMargin": "Marge IA"
+    },
+    "errors": {
+      "time": "Heure",
+      "type": "Type",
+      "message": "Message",
+      "path": "Chemin",
+      "user": "Utilisateur",
+      "empty": "Aucune erreur. Bravo."
+    },
+    "jobs": {
+      "job": "Tâche",
+      "queue": "File",
+      "workspace": "Espace de travail",
+      "started": "Démarrée",
+      "running": "En cours",
+      "noQueues": "Aucune file signalée.",
+      "empty": "Rien en cours."
+    },
+    "workers": {
+      "status": "État",
+      "node": "Nœud",
+      "heartbeat": "Signal de vie",
+      "currentJob": "Tâche en cours",
+      "desired": "Nombre souhaité",
+      "live": "En ligne",
+      "empty": "Aucun travailleur."
+    },
+    "events": {
+      "time": "Heure",
+      "type": "Type",
+      "actor": "Acteur",
+      "workspace": "Espace de travail",
+      "payload": "Charge utile",
+      "filterType": "Filtrer par type…",
+      "filterWorkspace": "ID d'espace de travail…",
+      "empty": "Aucun événement."
+    }
+  }
+}

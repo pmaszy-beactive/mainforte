@@ -1,0 +1,266 @@
+# Mainforte v3 — Plan (draft 3, 2026-09-25)
+
+Source: `IDEA.md`. Context from `../mainforte2` (v2, Node/Express/Expo), `../beactive-claw` (ActiveClaw), `../backbone/deploy` (platform).
+
+## Decisions so far
+
+| # | Decision | Call |
+|---|---|---|
+| 1 | Runtime | **Greenfield Python** (FastAPI + Celery). Port tool schemas from ActiveClaw, not code. |
+| 2 | Browser | **In-worker Chromium** (Playwright, persistent profile stored in the user's S3 home). backbone browser-proxy only for anonymous burst scraping. |
+| 3 | Compute model | **Pooled stateless agent workers** pulling from queues. No per-user containers. "Sleep" = no jobs in flight; nothing to wake. |
+| 4 | Mobile | **Capacitor** wrapping the Vite app. |
+| 5 | Relationship to v2 | **Separate product.** No migration. |
+| 6 | Live browser view | **Not in v1.** Results-as-widgets paradigm; screenshots ride on progress events. Additive later. |
+| 7 | Stripe | Embedded Payment Element. **Products, prices, discounts, coupons live in our DB**, not the Stripe dashboard (inline `price_data` / `coupon` created on the fly). Webhooks **only** for payment + subscription status (`payment_intent.*`, `invoice.*`, `customer.subscription.*`); hourly + on-login reconcile job is the safety net and the source of truth. |
+| 8 | Workers | Agent workers are backbone-provisioned instances like ActiveClaw's `cl-*`, but a **Python image type**. Start with **1**. Count controlled from the admin page. |
+| 9 | Superusers | `paul@beactive.ai`, `alice@beactive.ai`, `kainat@beactive.ai`. Everyone else is `user`. |
+| 10 | Admin | Impersonation, finances (subscriptions, invoices, usage, margin), API errors, job/worker control. Superusers only. |
+| 11 | Email / OAuth | SendGrid for password reset + magic link + notifications. Google OAuth for login **and** Gmail/Calendar scopes (incremental consent). |
+| 12 | User data | Lives in backbone S3 (backbone owns backups). Workers stage from / sync to S3. No local persistent volumes anywhere. |
+
+---
+
+## 0. What exists and what we take
+
+| Need | Exists | Verdict |
+|---|---|---|
+| Tool catalog | `beactive-claw/artifacts/activeai/src/tool-catalog.ts` (read/write/list/grep/glob/bash, schedule_job, notify, recall, web_*, db_query, image_generate) | Port the **schemas**; reimplement in Python |
+| GSuite | `beactive-claw/skills/activeai-gog` wrapping the `gog` Go CLI | Bake into worker image, call as subprocess |
+| Skills format | `SKILL.md` frontmatter → `skill_<name>` tool, JSON stdin/stdout | Keep the convention so v2 skills drop in |
+| Frame vocabulary | `chat.delta / tool_start / tool_progress / stage / final / error / rejected / queued` | Fold into the event taxonomy below |
+| LLM routing | backbone ai-proxy, margin per key | One ai-proxy key **per workspace**, minted at signup |
+| Storage | backbone s3-proxy, per-app prefix | `users/<uid>/` is the user's home; workers stage it |
+| Deploy | `.deploy.env`, `docker run app-<port>` / `worker-<port>`, auto PG/Redis/RabbitMQ, `/health` | Fits exactly. mainforte slug exists (port 9100, stopped) |
+| Meeting bot | `POST /meeting-bot/bots` + WS stream | Phase 6 tool |
+| Per-user containers, spare pool, gateway hostnames, Jenkins provisioning | ActiveClaw | **Dropped.** This was the complexity. |
+| realtime-gateway | one-way, hardcoded paths | Not used; own WS in API |
+
+---
+
+## 1. Architecture
+
+```
+ Web (Vite) ─┐        ┌──────────────────────────────────────────────┐
+ Mobile (Cap)┴──────▶ │ mainforte-api (FastAPI)                       │
+                      │  REST · /ws (one socket per client)          │
+                      │  auth · workspaces · impersonation · Stripe  │
+                      │  event log · widget serving (/w/<token>/)    │
+                      └──────────────┬───────────────────────────────┘
+                                     │ emit()
+                      ┌──────────────▼───────────────────────────────┐
+                      │ EVENT BUS  (Postgres `events` + Redis Stream  │
+                      │ per workspace).  Handlers registered by type. │
+                      └──┬──────────────┬───────────────┬────────────┘
+                 handlers│              │               │
+        ┌────────────────▼──┐  ┌────────▼────────┐  ┌───▼──────────────────┐
+        │ chat queue        │  │ work queue      │  │ system queue         │
+        │ persona turns,    │  │ needs sandbox:  │  │ rollups, stripe      │
+        │ router, no FS     │  │ tools, browser, │  │ reconcile, QA, cron  │
+        │ (fast, many)      │  │ builds (slow)   │  │                      │
+        └────────┬──────────┘  └────────┬────────┘  └──────────────────────┘
+                 │                      │
+        ┌────────▼──────────┐  ┌────────▼───────────────────────────────┐
+        │ chat-worker ×N    │  │ agent-worker ×M  (image w/ Chromium,   │
+        │ (plain celery)    │  │  python, node, gog, skills)            │
+        └───────────────────┘  │  per job: lock(user) → stage home from │
+                               │  S3 → run as throwaway uid → sync back │
+                               │  → unlock → emit events → next job     │
+                               └────────────────────────────────────────┘
+ backbone: ai-proxy · s3-proxy · meeting-bot · browser-proxy (burst only)
+```
+
+### 1.1 Event system (the spine)
+
+**Everything is an event.** An event is written to Postgres (`events` table: audit log, replayable) and appended to the workspace's Redis Stream (`ws:{id}`, fan-out to sockets and workers). Clients and workers `XREAD` from their last id on reconnect, so nothing is lost.
+
+Envelope:
+```json
+{"id":"01J...","ts":"...","type":"agent.work.error","ws_id":"...","user_id":"...",
+ "actor":{"type":"persona","id":"cfo"},"correlation_id":"task_123","causation_id":"01J...",
+ "payload":{...}}
+```
+
+Handler registry (Python):
+```python
+@on("chat.message.created")
+def route_personas(ev): ...          # enqueues chat.turn jobs
+@on("agent.work.end")
+def meter_usage(ev): ...             # bills tokens/minutes
+@on("agent.work.error")
+def noop(ev): pass                   # every type has at least a no-op
+```
+Handlers run as Celery tasks (queue chosen by decorator), so any handler can run anywhere. Sync handlers allowed only for pure in-process side effects (metrics).
+
+Taxonomy v1 (dot-namespaced, past tense for facts, `*.requested` for commands):
+
+| Namespace | Events |
+|---|---|
+| `connection` | `opened`, `closed`, `resumed` (client or worker socket) |
+| `session` / `user` | `login`, `logout`, `impersonation.started/ended`, `user.created/updated` |
+| `workspace` | `created`, `member.added/removed`, `plan.changed` |
+| `billing` | `card.saved`, `subscription.created/renewed/past_due/canceled`, `reconcile.ran`, `usage.recorded` |
+| `chat` | `message.created`, `message.feedback` (not-important/thumbs), `thread.created`, `thread.rolled_up` |
+| `persona` | `invited`, `renamed`, `removed`, `reply.started`, `reply.delta`, `reply.ended`, `reply.error`, `help.requested` |
+| `task` | `planned`, `approval.requested`, `approved`, `rejected`, `stage.started/ended`, `blocked` (needs human), `input.received`, `qa.passed/failed`, `completed`, `failed`, `scheduled`, `disabled` |
+| `agent.work` | `queued`, `started`, `progress`, `screenshot`, `error`, `ended` |
+| `tool` | `started`, `progress`, `ended`, `error`, `approval.requested/granted` |
+| `browser` | `session.opened/closed`, `navigation`, `handoff.requested` (2FA/captcha), `handoff.completed` |
+| `build` | `started`, `log`, `succeeded`, `failed` |
+| `widget` | `created`, `updated`, `published`, `viewed`, `disabled` |
+| `worker` | `online`, `offline`, `job.picked`, `job.released`, `home.staged`, `home.synced` |
+| `governor` | `claim.extracted`, `claim.verified`, `claim.unverified`, `claim.contradicted`, `reply.held`, `reply.released`, `reply.corrected` |
+
+Rule: a new surface ships with its events on day one, even if every handler is `noop`. The UI's activity feed, the audit log, billing, and the persona router are all just handlers.
+
+### 1.2 Control plane (FastAPI)
+- SQLAlchemy 2 + Alembic on backbone Postgres. Redis for streams/locks. Celery on backbone RabbitMQ.
+- **Auth:** email+password, magic link, Google OIDC. JWT. `users`, `workspaces` (=families), `memberships(role)`. Superuser **impersonation** mints a session with `act_as`; every request carries real + effective user; emits `session.impersonation.*`.
+- **Stripe embedded:** `plans`, `prices`, `coupons` tables are ours. SetupIntent → save card; Subscription created with inline `price_data` from our plan row (Good/Better/Best 19/29/59); discounts applied by creating a Stripe coupon on the fly from our coupon row. Webhook endpoint (`POST /api/stripe/webhook`, raw body, idempotent on event id) handles only `payment_intent.*`, `invoice.*`, `customer.subscription.*` → emits `billing.*`. Reconcile job (system queue, hourly + on login) re-pulls status/latest invoice so a missed webhook never strands a user. `requires_action` surfaces in-app. Marketplace later: Connect, separate charges + transfers, manual payouts as escrow, 20% `application_fee`.
+- **Email:** SendGrid (transactional templates in-repo): password reset, magic link, `task.blocked` / `task.completed` digests. Keys via `.env` from backbone `env-pull`.
+- **Google OAuth:** login (OIDC) with incremental consent for `gmail.readonly`/`gmail.send`/`calendar` when a persona first needs them. Refresh tokens encrypted at rest (Fernet), refreshed by a system-queue job; the `gog` skill in the worker reads them from the staged home.
+- **Admin (superusers only, `/admin`):** Users (search, impersonate, plan, usage); Finances (MRR, subscriptions, invoices, failed payments, ai-proxy `cost_usd` vs `charged_usd` margin per workspace); API errors (from `*.error` events + exception log); Jobs (queues depth, running jobs, retry/kill); Workers (desired count, live count, start/stop one, per-worker load); Events (searchable log).
+- **/ws:** one socket per client; subscribes to the workspace stream; sends `ack` with last id; server replays gap on resume.
+
+### 1.3 Queues and workers
+- **`chat` queue → chat-worker (plain Celery, many).** Persona turns: build prompt (soul + role + workspace memory + rollups + thread), call ai-proxy, stream `persona.reply.delta` events. No filesystem, no browser. Seconds.
+- **`work` queue → agent-worker (fat image, fewer).** Anything needing tools. Per job:
+  1. `SETNX lock:user:<uid>` (TTL = job max + margin). If held, requeue with backoff.
+  2. Stage `users/<uid>/` from S3 into `/work/<job>/home` (manifest-based sync; profile tarball for Chromium). Emit `worker.home.staged`.
+  3. Run the agent loop. Tool commands execute as a throwaway uid over the `chmod 700` staging dir, wrapped in `timeout`/`prlimit`. Chromium launched with `--user-data-dir` in staging.
+  4. Sync changes back to S3. Emit `worker.home.synced`. Wipe staging. Release lock.
+- **`system` queue:** rollups, Stripe reconcile, QA runs, scheduled task triggers, cleanup.
+- **Isolation tiers:** v1 = uid + fs perms + rlimits. v2 = sibling `docker run --rm` per job or gVisor, behind the same `Sandbox` interface. Decide by Phase 4 based on what tools users actually get.
+- **Human-in-the-loop mid-job:** worker emits `task.blocked` (with screenshot) and waits on the stream for `task.input.received` up to `HITL_WAIT_SECONDS` (default 600). On timeout: checkpoint (cookies + notes), sync, release, emit `task.failed{reason:timeout}`; the persona says so in chat; retry when user responds.
+- **Long jobs:** fine, they just occupy a worker. Scale M. A user's chat keeps flowing on the chat queue meanwhile.
+
+### 1.3a Chat hardening (interruption, deploy, node down, restart, attachments)
+
+Everything below is implemented in P0 on the server; the client half is in the frontend shell.
+
+| Failure | What happens | Mechanism |
+|---|---|---|
+| Client drops mid-send | Retry is safe | Every post carries `client_msg_id`; `(ws_id, client_msg_id)` ledger returns the original event on replay. Client keeps a persisted outbound queue with backoff, resumes on `online`/reconnect. |
+| Socket dies silently | Client notices within 45s | Server `_heartbeat` after 20s idle; client reconnects with `after=<last id>` and gets a Postgres replay of the gap, de-duplicated by event id. |
+| API process dies after commit, before publish | Nothing is lost | Transactional outbox: publish + handler enqueue run in `after_commit`; `events.dispatched_at` is set only on success; `sweep_outbox` (beat, 30s) re-dispatches anything older than 60s still unmarked. Handlers are at-least-once and idempotent on event id. |
+| Rollback after emit | No phantom event | Pending events live in the session and are dropped on `after_rollback`. |
+| Worker killed / OOM / node down | Job is redelivered | `task_acks_late` + `task_reject_on_worker_lost` + prefetch 1. Long work jobs checkpoint progress as events so the redelivered run resumes, not restarts (P2). |
+| Redeploy | Zero loss | Backbone drains the old worker; API restart closes sockets, clients reconnect + replay. Redis/RabbitMQ blips are covered by publish confirms + publish retry + the outbox sweeper. |
+| User wants it to stop | Stops at next checkpoint | `POST .../chat/cancel` sets `cancel:{ws}:{thread|correlation}` in Redis (TTL 300s) and emits `persona.reply.cancel_requested`; workers check the flag between LLM chunks and tool calls and emit `persona.reply.canceled` / `task.canceled`. |
+| Streaming reply, socket lost mid-stream | Final text still arrives | `persona.reply.delta` is stream-only (ephemeral); `persona.reply.ended` carries the full text and is replayed. |
+| Attachments | Engine can reach them | `POST .../uploads` (25MB, images/text/pdf/office/zip) stores to `users/<uid>/uploads/<ulid>-<name>` in backbone S3 (local disk in dev); the message event carries `{id,key,name,content_type,size,url}`; workers fetch by key while staging. |
+
+### 1.4 Personas
+- Persona = `{name, role, soul.md, interests[], tools[], can_invite[]}`. Stock: **Concierge** (butler name, user renames), PM, CFO, CTO/Architect, Marketer, Coder, Executor, QA.
+- Global channel + DM threads. **Personas are turns, not connections.** Handler on `chat.message.created`: `@mention` → that persona, always; else router (one Haiku call over persona interest cards) picks 0–2 speakers. "Not important" feedback → `chat.message.feedback` → dampens that persona's volunteering.
+- Negotiation = personas reply in the global channel with `reply_to`, bounded by a per-task turn budget.
+- Concierge onboarding on first run → seeds workspace memory → suggests invites.
+- Memory: per-persona notes + shared workspace memory; day→week→month rollups (system queue) injected like ActiveClaw's `recall`.
+
+### 1.5 Task pipeline
+`task.planned` (Architect, plan card) → `task.approval.requested` → user approves → stages emit `task.stage.*` → QA persona verifies (`task.qa.*`) → Executor schedules recurrence (`task.scheduled`) → any `task.failed` posts into global chat with the error, personas propose fixes (bounded) → re-plan. Self-healing is this loop.
+
+### 1.5a The Governor (execution truth, anti-hallucination)
+
+**Problem:** every persona reply and every rollup summary is an LLM call whose only check today is "did the HTTP request succeed." Nothing verifies that what the model *said* happened actually happened, or that a claim of fact is grounded in something real. Once P2 gives personas tools (email, calendar, browser, payments), an ungoverned model confidently saying "I booked it" when no `tool.ended` event exists for that action is a trust-destroying failure mode, not a cosmetic one. The Governor is the system component that closes this gap. It is not a persona — a persona is itself an LLM call and cannot certify its own output — it is plain deterministic code plus one cheap, narrowly-scoped verifier LLM call, sitting on the event spine like every other handler.
+
+**Scope — two distinct failure modes, both covered:**
+1. **Fabricated action** ("I sent the email" / "I found 3 flights under $400"): the reply claims a completed action or a concrete result. Governed by **execution grounding**: the claim must trace to a real `tool.*`/`agent.work.*`/`billing.*` event with a matching `correlation_id` that actually succeeded, for this turn.
+2. **Fabricated fact** (a number, a date, a policy detail asserted with confidence but never looked up): no tool call is claimed, but the assertion is checkable. Governed by **confidence/consistency checks**: does the claim contradict workspace memory, the thread's own history, or (P2+) a tool-backed lookup that should have been made instead of guessed?
+
+**Mechanics — runs as a handler on `persona.reply.ended` (and `chat.thread.rolled_up` for rollups), on the `system` queue, before the reply is released to the client:**
+
+1. **Extract claims.** A single cheap Haiku call over the reply text pulls a short structured list of checkable claims (`{"type": "action"|"fact", "text": "...", "cites_correlation_id": "..."}`) — cheap because it's one small classification call, not a second full reasoning pass. Emits `governor.claim.extracted` per claim (empty list is the common case and is itself a valid, cheap outcome).
+2. **Verify action claims mechanically, no LLM.** For each `type: "action"` claim, query the `events` table for `tool.ended`/`agent.work.ended`/`billing.*` rows sharing this turn's `correlation_id`. Match → `governor.claim.verified`. No matching event → `governor.claim.unverified`.
+3. **Verify fact claims cheaply.** Cross-check against `Memory` rows and the thread's own prior events (deterministic lookup, no LLM) first; only fall through to a second small verifier LLM call (different prompt, explicitly told to be skeptical and cite contradictions) when the deterministic check can't settle it. Contradiction found → `governor.claim.contradicted`.
+4. **Gate on severity, don't block on noise.** An `unverified`/`contradicted` *fact* claim in ordinary chat is annotated, not held — emit `governor.reply.released` with a `needs_verification` flag the UI can render as a subtle "unverified" marker (cheap, doesn't slow down chat). An `unverified` *action* claim (P2+, once tools exist) is held: `governor.reply.held`, the reply is not shown as-is, and the persona is re-prompted once with "you claimed X but no tool ran — either call the tool or restate without the claim" → `governor.reply.corrected`. A second failure escalates to `task.blocked`-style human surfacing rather than looping forever (bounded retries, same principle as the task pipeline's turn budget).
+5. **Always durable.** Every governor decision is its own event (`governor.*`), so the admin Events view and the activity feed show hallucination-catch rate for free, the same way `*.error` events already surface in Admin → API errors — this is a KPI (claims-per-reply, unverified-rate, correction-rate per persona/model) from day one, not an afterthought.
+
+**Why on the event spine and not inline in `router.py`:** keeping it a handler (not a function call bolted into `run_reply`) means it applies uniformly to chat replies, rollup summaries, and later task-planning/QA output without each call site remembering to invoke it, matches the existing "a new surface ships with its events on day one" rule, and means the Governor itself is swappable/tunable (stricter mode per workspace, disabled for low-stakes personas) via config rather than code changes at each LLM call site.
+
+**Explicitly not doing (avoid scope creep of a P1/P2 feature into a full verification research project):** no attempt at general open-domain fact-checking against the internet (that's a browser/tool job the persona itself should be doing, not the Governor's); no blocking-by-default on unverified *facts* in casual chat (would make the product feel broken for normal conversation); no per-token confidence scoring or logit-based hallucination detection (not exposed by ai-proxy, not worth building custom infra for in v1).
+
+**Phasing:** land the event types, the claim-extraction handler, and fact-vs-memory contradiction checks in **P1** (cheap, no tools exist yet so action-claims are rare, but the pipeline and dashboarding should exist before P2 makes the stakes real) — see the P1 phase entry. Wire action-claim grounding against real `tool.*`/`agent.work.*` events, and the hold-and-reprompt loop, in **P2** once tools exist to check against, and fold `task.qa.*` on top of it (QA verifies task *outcomes*, Governor verifies every *reply* — QA can consume `governor.claim.*` events as one of its inputs rather than re-deriving grounding from scratch).
+
+### 1.6 Widgets
+Versioned bundle at `users/<uid>/widgets/<slug>/` (fixed HTML/JS template + `data.json`). API serves at `/w/<token>/` with key auth. Left rail lists widgets by name; same bundle renders in web and mobile WebView. Refresh = a scheduled work job that rewrites `data.json` and emits `widget.updated`.
+
+### 1.7 Frontend
+Vite + React + Tailwind. Layout per IDEA: left rail (widgets / bots with global channel pinned / profile+billing), center chat (bubbles, images, widget cards, history, new chat). Marketing, pricing, signup as routes. Capacitor for iOS/Android; push on `task.blocked` and `task.completed`.
+
+---
+
+### 1.8 Worker provisioning (how `aw-*` instances start)
+
+How ActiveClaw does it: api-server → SSH through backbone's `ssh-bastion` (pure jump host, `ForceCommand /bin/false`, `PermitOpen` to Jenkins) → Jenkins CLI `build <job> -p K=V` → Jenkins job runs `docker run` on a node. **The Jenkins jobs are not in any repo**; they exist only in the Jenkins UI. Backbone has a Python/Celery version of the same pattern (`flask-api/jenkins_manager.py` + `flask-api/vexa_spare_pool.py` + `scripts/deploy-vexa.sh`) which is our template.
+
+Our agent workers are simpler than `cl-*` because they are **plain Celery consumers**: no public hostname, no per-user volume, no registration handshake. They need only `--network deploy_backend` (or backbone's public URL when on another node) and the app's `CELERY_BROKER_URL` / `REDIS_URL` / `DATABASE_URL` / S3 / ai-proxy env.
+
+**Two stages:**
+
+1. **Worker #1 needs no Jenkins work.** `.deploy.env` sets `HAS_WORKER=true`, `WORKER_SERVICE=worker` (separate fat image with Chromium), `WORKER_CMD="celery -A mainforte worker -Q chat,work,system --concurrency=2"`. Backbone starts it, health-checks it, drains it on redeploy. This is P0.
+2. **Workers #2..N from the admin page (P4):** two Jenkins jobs `mainforte-agent-worker-up` / `-down` (params `WORKER_ID`, `IMAGE`, `NODE`, `WORKER_TOKEN`), a node-side `scripts/deploy-agent-worker.sh up|down` modelled on `deploy-vexa.sh` (`docker run -d --name aw-<id> --network deploy_backend -m 4g --cpus 2 --label mainforte.agent-worker=1 ...`), an `agent_workers` table (id, status, node, container, token_hash, last_heartbeat, desired), a Celery task that calls `trigger_jenkins_build_sync` via SSH-through-bastion exactly like ActiveClaw's `lib/jenkins.ts`, a 30s heartbeat from each worker to `POST /api/internal/workers/<id>/heartbeat`, and a reconcile sweep (`docker ps --filter label=...` via `run_node_command`). Admin sets *desired count*; a system-queue job converges live → desired. Node choice from backbone `deploy_nodes`.
+
+Queue split: all workers run the same image; the `-Q` list decides whether a worker is a chat-worker or an agent-worker. Split them when chat latency suffers, not before.
+
+### 1.9 Storage layout (backbone S3)
+
+Facts from `s3-proxy/s3_proxy.py` (code beats docs): SigV4 with `gai_` key + S3 secret (created by hand in backbone dashboard; key needs `s3` in `allowed_models`, an `app_id`, and an expiry); path-style, `Bucket="any"`, namespaced under `storage/<app-slug>/`; **GET reads the whole object into memory, no Range**; **no batch delete**; presign GET returns a proxied share link (max 7200s, no auth needed); presign PUT is a raw AWS URL with no CORS configured; direct-upload flow = request → PUT → finalize; keys ≤ ~950 chars, no `..`.
+
+Consequences:
+- A user home is **not** thousands of small objects. It is a few zstd tarballs plus a manifest:
+  ```
+  users/<uid>/home/manifest.json           {version, tarballs:{workspace, browser}, sizes, updated_at}
+  users/<uid>/home/workspace.tar.zst       files, notes, skills state
+  users/<uid>/home/browser.tar.zst         Chromium profile (cache dirs stripped)
+  users/<uid>/home/snapshots/<ts>/...      last 3 daily copies (our own insurance)
+  users/<uid>/widgets/<slug>/<ver>/...     individual objects, served via presign share links
+  users/<uid>/outputs/...                  images, csv, pdf the personas produce
+  users/<uid>/uploads/...                  user-provided files
+  ```
+- Stage = download 2 tarballs → extract. Sync = tar changed dirs → upload → update manifest → move previous to snapshot. Measure in P2; cap browser profile at ~200MB.
+- Uploads from web/mobile go **through our API** in v1 (no CORS on the raw presign URL). Direct-upload flow later once bucket CORS is set.
+- Delete = list + delete one by one (system-queue job), because batch delete is unsupported.
+- **Backbone backup caveat:** `backup/backup.py` reads `storage/{api_key_id}/…` but the proxy writes `storage/{slug}/…`, so backbone's S3 backups very likely copy nothing. We keep our own `snapshots/` until that is fixed in backbone.
+
+---
+
+## 2. Phases
+
+**P0 Skeleton (1–2 wks):** repo layout, `.deploy.env`, `/health`, Alembic, **event bus + registry + `events` table + /ws replay**, auth, workspaces, impersonation, Vite shell, deploy to backbone.
+
+**P1 Chat + personas (2–3 wks):** chat queue, persona router, Concierge onboarding, 3 stock personas, rollups, ai-proxy per-workspace key, usage view, activity feed (reads events), **Governor v1** (claim extraction + fact/memory contradiction checks, see 1.5a).
+
+**P2 Agent workers (3–4 wks):** worker image (Chromium/Playwright/python/node/gog/skills), user lock, S3 home staging/sync, tool catalog port, throwaway-uid sandbox, `task.blocked` HITL flow, widgets pipeline + rail, **Governor v2** (action-claim grounding against `tool.*`/`agent.work.*` events, hold-and-reprompt loop, see 1.5a). **Milestone: $5k car search end to end — includes the Governor catching at least one seeded hallucinated action claim in testing.**
+
+**P3 Money (1–2 wks):** Stripe embedded, reconcile job, plan gating, billing page.
+
+**P4 Task pipeline (2 wks):** plan → approve → stages → QA → executor, recurrence, self-healing loop, isolation v2 decision. QA (`task.qa.*`) consumes `governor.claim.*` events rather than re-deriving grounding checks.
+
+**P5 Mobile (2 wks):** Capacitor builds, push, store submission.
+
+**P6 Integrations (ongoing):** gog (Gmail/Calendar), meeting-bot, Plaid, Stripe-as-data, price tracking/wishlists, coupons, marketplace + Connect escrow.
+
+---
+
+## 3. Open items
+
+- **Jenkins jobs for workers #2..N** must be created in the Jenkins UI (not a repo). Needed by P4, not before. Same for the SSH key pair through the bastion (bastion `authorized_keys`).
+- **S3 API key** for the app: create in backbone dashboard with `s3` allowed, note the secret once.
+- **Backbone S3 backup prefix mismatch** (see 1.9). Report to backbone; keep own snapshots meanwhile.
+- **SendGrid keys, Google OAuth client, Stripe keys**: needed by P1 (SendGrid), P1 (Google), P3 (Stripe). Go in `.env` via backbone `env-pull`.
+- **Chromium memory per job** sets `--concurrency` (est. 2 per 4GB worker). Measure in P2.
+- **Isolation v2** (sibling containers / gVisor) decided by P4.
+- **Governor cost/latency** (see 1.5a): claim extraction adds one small Haiku call per persona reply. Measure added latency and ai-proxy cost per reply in P1; if it materially hurts chat responsiveness, move it off the critical path (verify after the reply is already streamed to the client, correct/annotate after the fact) rather than cutting the check.
+
+---
+
+## 4. Status log
+
+**2026-09-25 — P0 backend done and smoke-tested locally.** FastAPI + Alembic (`0001_initial`: users, oauth_identities, workspaces, memberships, auth_tokens, events, api_errors, agent_workers, settings). Event bus (`emit` → Postgres + Redis stream + Celery-dispatched `@on` handlers) with the full v1 taxonomy. `/ws` with Postgres replay then stream tail (race fixed: stream position pinned before replay). Auth: register/login/logout, magic link, password reset, Google OIDC, impersonation with `act_as` (admin routes refuse impersonated sessions). Workspaces + members. Chat post → `chat.message.created`. Admin: users, finances (stub), errors, jobs (queue depths + running), workers (desired count), events, event types. i18n en-US/fr-CA on user + emails. Celery: chat/work/system queues, beat heartbeat registers worker #1. Frontend shell (Vite/React/Tailwind, react-router, TanStack Query, zustand, react-i18next en-US/fr-CA with browser + timezone detection): marketing, pricing, signup/login/magic/reset/OAuth callback, dashboard (rail: widgets / staff with global channel / profile), chat pane on the event stream, admin (users w/ impersonate, finances, errors, jobs, workers desired-count, events). Both Docker images build and run (api 620MB serves SPA + API; worker launches headless Chromium, has sandbox uid, node, zstd, tini).
+
+**2026-09-25 — Chat hardening (server + client).** Transactional outbox with `dispatched_at` + 30s sweeper (drilled: post with Redis down → committed → re-published after Redis returned). Idempotent posts via `client_msg_id`. Uploads to S3/local under `users/<uid>/uploads/`, referenced on the message event, served back with auth. Cancel endpoint + Redis flag. Celery acks-late + reject-on-worker-lost + publish confirms/retry + handler autoretry with backoff. Socket server heartbeat; client 45s watchdog, persisted outbound queue with backoff, optimistic bubbles reconciled by `client_msg_id`, draft + last-event-id persistence, paste/drag/paperclip attachments with progress, Stop button, connection pill. Events endpoint returns latest N without a cursor. Verified from the real UI: login → hydrate → send → event persisted with `client_msg_id`.
+
+**2026-09-25 — Concierge onboarding + workspace memory + rollups.** `Memory` table (workspace/persona/rollup_day kinds, migrated). `workspace.created` → `onboard_workspace` handler (registered in both the API and Celery worker import paths) seeds a `Memory(kind="workspace")` row, opens the global thread, and has the Concierge post an unprompted greeting mentioning inviting other staff — covers both the signup and explicit-create call sites since it's event-driven, not call-site-hooked. Persona replies now inject shared/persona memory into the system prompt and pull real thread history (`events` table, capped) instead of a single-turn stub. Daily `rollup_threads` beat job (new `crontab` beat schedule entry) condenses threads idle >24h into a `rollup_day` Memory row via ai-proxy and emits `chat.thread.rolled_up`; skip-guards verified for both "too recent" and "no ai-proxy key" cases. Verified live: signup → onboarding fires → memory seeded → Concierge greets (fallback-echo locally, no AI_PROXY configured in dev) → second message in-thread carries full history → `@cfo` mention still routes correctly once CFO is invited → cancel endpoint unaffected. Activity feed needs no changes (generic type/payload fallback already renders `memory.noted` / `chat.thread.rolled_up`). Deferred: frontend memory/notes UI, week/month rollups, "not important" feedback dampening.
+
+**Next (P1):** usage view (ai-proxy cost/usage surfaced per workspace), then close out P1 before starting P2 agent workers.
