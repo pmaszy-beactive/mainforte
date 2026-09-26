@@ -201,6 +201,27 @@ class Task(IdMixin, TimestampMixin, Base):
     correlation_id: Mapped[str | None] = mapped_column(String(26), index=True)
 
 
+# ---------------------------------------------------------------- widgets
+
+
+class Widget(IdMixin, TimestampMixin, Base):
+    """A small HTML+data bundle a persona publishes and can refresh on a schedule (PLAN.md §1.7).
+    Served unauthenticated at /w/{token}/ — `token` is the raw capability secret (not hashed like
+    AuthToken) since serving needs a direct lookup with no separate login step."""
+
+    __tablename__ = "widgets"
+    __table_args__ = (UniqueConstraint("owner_id", "slug", name="uq_widget_owner_slug"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)  # active|disabled
+    refresh_spec: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    token: Mapped[str] = mapped_column(String(26), nullable=False, unique=True, index=True)
+
+
 # ---------------------------------------------------------------- ops
 
 

@@ -23,6 +23,7 @@ from mainforte.events import onboarding  # noqa: F401  (register onboarding hand
 from mainforte.events.stream import sync_redis
 from mainforte.personas.routes import router as personas_router
 from mainforte.tasks.routes import router as tasks_router
+from mainforte.widgets import router as widgets_router
 from mainforte.workspaces.routes import router as ws_router
 from mainforte.ws.routes import router as socket_router
 
@@ -35,7 +36,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, setting
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth_router, me_router, ws_router, chat_router, personas_router, admin_router, socket_router,
-          tasks_router):
+          tasks_router, widgets_router):
     app.include_router(r)
 
 

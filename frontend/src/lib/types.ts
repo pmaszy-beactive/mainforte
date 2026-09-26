@@ -101,6 +101,16 @@ export interface Task {
   result: unknown;
 }
 
+export interface Widget {
+  id: string;
+  title: string;
+  slug: string;
+  version: number;
+  status: "active" | "disabled";
+  token: string;
+  url: string;
+}
+
 /* Admin */
 export interface AdminUser {
   id: string;

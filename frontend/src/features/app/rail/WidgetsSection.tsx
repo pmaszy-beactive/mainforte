@@ -1,12 +1,20 @@
 import { LayoutGrid } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { RailSection } from "./RailSection";
+import { useQuery } from "@tanstack/react-query";
+import { RailItem, RailSection } from "./RailSection";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { api } from "@/lib/api";
+import { useUi } from "@/stores/ui";
 
-// Widgets land in P2 (PLAN 1.6). Shell only: list + empty state.
 export function WidgetsSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
-  const widgets: { id: string; name: string }[] = [];
+  const wsId = useUi((s) => s.workspaceId);
+  const { data: widgets = [] } = useQuery({
+    queryKey: ["widgets", wsId],
+    queryFn: () => api.widgets.list(wsId!),
+    enabled: !!wsId,
+  });
+
   if (collapsed) {
     return (
       <div className="grid place-items-center text-fog-700" title={t("app.widgets.title")}>
@@ -18,7 +26,19 @@ export function WidgetsSection({ collapsed }: { collapsed: boolean }) {
     <RailSection title={t("app.widgets.title")} collapsed={collapsed}>
       {widgets.length === 0 ? (
         <EmptyState icon={<LayoutGrid className="size-5" />} title={t("app.widgets.empty")} hint={t("app.widgets.emptyHint")} />
-      ) : null}
+      ) : (
+        <div className="space-y-0.5">
+          {widgets.map((w) => (
+            <RailItem
+              key={w.id}
+              collapsed={collapsed}
+              icon={<LayoutGrid className="size-4" />}
+              label={w.title}
+              onClick={() => window.open(w.url, "_blank", "noopener,noreferrer")}
+            />
+          ))}
+        </div>
+      )}
     </RailSection>
   );
 }

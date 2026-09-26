@@ -108,3 +108,7 @@ def get_storage() -> Storage:
 
 def upload_key(user_id: str, upload_id: str, name: str) -> str:
     return f"users/{user_id}/uploads/{upload_id}-{safe_name(name)}"
+
+
+def widget_key(user_id: str, slug: str, version: int, filename: str) -> str:
+    return f"users/{user_id}/widgets/{slug}/{version}/{filename}"

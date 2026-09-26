@@ -223,3 +223,56 @@ _register(Tool(
     handler=_create_task,
     sandboxed=False,
 ))
+
+
+def _create_widget(*, ws_id: str, owner_id: str, title: str, slug: str, html: str,
+                    data: dict[str, Any] | None = None, refresh_spec: dict[str, Any] | None = None,
+                    correlation_id: str | None = None) -> dict[str, Any]:
+    """In-process handler for the `create_widget` tool: writes the bundle to storage and creates
+    the Widget row. No sandbox needed — this only touches Storage/DB, never runs the persona's
+    HTML (see PLAN.md P2 phase 7)."""
+    from mainforte.config import get_settings
+    from mainforte.db.session import db_session
+    from mainforte.events import emit
+    from mainforte.storage import safe_name
+    from mainforte.widgets import create_widget as _create
+
+    safe_slug = safe_name(slug)
+    with db_session() as db:
+        widget = _create(db, ws_id=ws_id, owner_id=owner_id, title=title, slug=safe_slug,
+                          html=html, data=data or {}, refresh_spec=refresh_spec)
+        emit(db, "widget.created", ws_id=ws_id, actor=("persona", owner_id), correlation_id=correlation_id,
+             payload={"widget_id": widget.id, "title": title, "slug": safe_slug, "token": widget.token})
+        widget_id, token = widget.id, widget.token
+
+    url = f"{get_settings().api_url}/w/{token}/"
+    return {"widget_id": widget_id, "url": url, "token": token}
+
+
+_register(Tool(
+    name="create_widget",
+    description=(
+        "Publish a small HTML+data widget that the human can view at a stable URL and that shows "
+        "up in their rail. Use this for a dashboard, chart, or summary the human should be able to "
+        "revisit without asking again — not for one-off answers in chat. `html` should read its "
+        "data from a sibling `data.json` (fetch('./data.json')) rather than inlining values, so a "
+        "refresh can update the data without re-publishing the template. Pass `refresh_spec` only "
+        "if the widget's data should be recomputed on a schedule."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Short human-readable title"},
+            "slug": {"type": "string", "description": "URL-safe identifier, unique per user"},
+            "html": {"type": "string", "description": "Full HTML document for index.html"},
+            "data": {"type": "object", "description": "JSON data the HTML reads from data.json"},
+            "refresh_spec": {
+                "type": "object",
+                "description": "Optional schedule/instructions for periodic refresh (shape owned by the refresh job)",
+            },
+        },
+        "required": ["title", "slug", "html"],
+    },
+    handler=_create_widget,
+    sandboxed=False,
+))

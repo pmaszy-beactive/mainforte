@@ -10,7 +10,7 @@ from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
 from mainforte.db.base import utcnow
-from mainforte.db.models import AgentWorker, AuthToken, Event, Memory, Workspace
+from mainforte.db.models import AgentWorker, AuthToken, Event, Memory, Widget, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit
 from mainforte.events.bus import dispatch, to_dict
@@ -120,3 +120,44 @@ def rollup_threads() -> int:
                  payload={"thread_id": thread_id, "memory_id": mem.id, "period": "day"})
             n += 1
     return n
+
+
+@celery.task(name="mainforte.tasks.system.refresh_due_widgets")
+def refresh_due_widgets() -> int:
+    """Beat-driven sweep (P2 phase 7): dispatches `refresh_widget` for every active widget that
+    carries a `refresh_spec`. Runs every 5min; `refresh_spec` itself owns *when* a given widget is
+    actually due (checked inside `refresh_widget`, not here) so this sweep stays a cheap fan-out."""
+    with db_session() as db:
+        ids = [row[0] for row in db.query(Widget.id)
+               .filter(Widget.status == "active", Widget.refresh_spec.isnot(None)).all()]
+    for widget_id in ids:
+        refresh_widget_task.delay(widget_id=widget_id)
+    return len(ids)
+
+
+@celery.task(name="mainforte.tasks.system.refresh_widget")
+def refresh_widget_task(*, widget_id: str) -> None:
+    """Re-runs `refresh_spec`'s tool to get fresh data, rewrites the widget's data.json (bumping
+    version), and emits `widget.updated`. `refresh_spec` shape: {"tool": <name in tools.catalog.TOOLS>,
+    "input": {...}, "due": {...}} — `due` is interpreted here (e.g. a next-run timestamp updated
+    after each successful refresh) so this task, not the sweep, owns cadence."""
+    from mainforte.tools.catalog import TOOLS
+    from mainforte.widgets import refresh_widget as _refresh
+
+    with db_session() as db:
+        widget = db.get(Widget, widget_id)
+        if not widget or widget.status != "active" or not widget.refresh_spec:
+            return
+        spec = widget.refresh_spec
+        tool = TOOLS.get(spec.get("tool", ""))
+        if tool is None or tool.sandboxed:
+            log.warning("widget %s refresh_spec names unusable tool %r", widget_id, spec.get("tool"))
+            return
+        try:
+            data = tool.handler(**spec.get("input", {}))
+        except Exception:
+            log.exception("widget %s refresh failed", widget_id)
+            return
+        _refresh(widget, data if isinstance(data, dict) else {"result": data})
+        emit(db, "widget.updated", ws_id=widget.ws_id, actor=("system", None), correlation_id=None,
+             payload={"widget_id": widget.id, "version": widget.version})

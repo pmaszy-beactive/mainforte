@@ -9,6 +9,7 @@ import type {
   ChatPostResponse,
   Me,
   Task,
+  Widget,
   Workspace,
   WsEvent,
 } from "./types";
@@ -133,6 +134,9 @@ export const api = {
       post<{ event_id: string; status: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}/reject`),
     input: (wsId: string, taskId: string, text: string) =>
       post<{ event_id: string; status: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}/input`, { text }),
+  },
+  widgets: {
+    list: (wsId: string) => get<Widget[]>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets`),
   },
   admin: {
     users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),
