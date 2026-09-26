@@ -1,0 +1,6 @@
+# Isolation v2 (P4 §4) per-job image: runs exactly one sandboxed tool call, as the throwaway
+# `sandbox` uid, then exits. No Celery, no tini -- launched directly by sandbox-launcherd's
+# `docker run --rm -i ... python -m mainforte.tools.sandbox_exec`, one container per job.
+FROM mainforte-base
+USER sandbox
+ENTRYPOINT ["python", "-m", "mainforte.tools.sandbox_exec"]

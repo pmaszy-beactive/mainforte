@@ -39,8 +39,11 @@ celery.conf.update(
         "rollup-threads": {"task": "mainforte.tasks.system.rollup_threads", "schedule": crontab(hour=6, minute=0)},
         "refresh-due-widgets": {"task": "mainforte.tasks.system.refresh_due_widgets", "schedule": 300.0},
         "reconcile-subscriptions": {"task": "mainforte.tasks.billing.reconcile_subscriptions", "schedule": 3600.0},
+        "sweep-stuck-tasks": {"task": "mainforte.tasks.healing.sweep_stuck_tasks", "schedule": 120.0},
+        "refresh-due-tasks": {"task": "mainforte.tasks.system.refresh_due_tasks", "schedule": 60.0},
     },
-    imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work", "mainforte.tasks.billing"),
+    imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work", "mainforte.tasks.billing",
+             "mainforte.tasks.healing", "mainforte.tasks.schedule"),
 )
 
 

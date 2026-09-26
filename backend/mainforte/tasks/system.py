@@ -10,7 +10,7 @@ from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
 from mainforte.db.base import utcnow
-from mainforte.db.models import AgentWorker, AuthToken, Event, Memory, Widget, Workspace
+from mainforte.db.models import AgentWorker, AuthToken, Event, Memory, Task, Widget, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit
 from mainforte.events.bus import dispatch, to_dict
@@ -132,6 +132,31 @@ def refresh_due_widgets() -> int:
                .filter(Widget.status == "active", Widget.refresh_spec.isnot(None)).all()]
     for widget_id in ids:
         refresh_widget_task.delay(widget_id=widget_id)
+    return len(ids)
+
+
+@celery.task(name="mainforte.tasks.system.refresh_due_tasks")
+def refresh_due_tasks() -> int:
+    """Beat-driven sweep (P4 recurrence), parallel to `refresh_due_widgets`: fans out
+    `fire_scheduled_task` for every `scheduled` template whose `schedule.next_run_at` has passed.
+    Runs every 60s -- more time-sensitive than widgets' 300s, since a task recurrence is often
+    wall-clock-meaningful (e.g. "every morning at 8") in a way a data-refresh cadence isn't.
+    `next_run_at` is stored as an ISO-8601 UTC string inside the `schedule` JSONB; string comparison
+    against another ISO-8601 UTC string sorts identically to a timestamp comparison, so this stays a
+    plain JSONB text match rather than needing a cast."""
+    from mainforte.tasks.work import fire_scheduled_task
+
+    now_iso = utcnow().isoformat()
+    with db_session() as db:
+        ids = [
+            row[0] for row in db.query(Task.id)
+            .filter(Task.status == "scheduled",
+                    Task.schedule["active"].astext == "true",
+                    Task.schedule["next_run_at"].astext <= now_iso)
+            .all()
+        ]
+    for task_id in ids:
+        fire_scheduled_task.delay(task_id=task_id)
     return len(ids)
 
 

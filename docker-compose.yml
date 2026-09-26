@@ -4,7 +4,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+  base:
+    image: mainforte-base
+    build:
+      context: .
+      dockerfile: Dockerfile.base
   worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    depends_on: [base]
+  sandbox:
+    image: mainforte-sandbox
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    depends_on: [base]
+  launcherd:
+    build:
+      context: .
+      dockerfile: Dockerfile.launcherd

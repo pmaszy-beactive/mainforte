@@ -1,0 +1,23 @@
+# Shared base for the worker and sandbox images (P4 §4): python + chromium (playwright) + node +
+# tools + the backend source tree. Split out of what was Dockerfile.worker so the sandbox image
+# (which runs untrusted tool calls) doesn't need Celery/tini, and the worker image (which never
+# runs untrusted code directly anymore under isolation v2) doesn't need a throwaway uid baked in
+# for its own sake -- both images still get it here since v1 (local dev fallback) needs it either way.
+FROM python:3.12-slim-bookworm
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 UV_SYSTEM_PYTHON=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq ripgrep sqlite3 postgresql-client poppler-utils zstd tini \
+      nodejs npm util-linux \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml ./
+RUN uv pip install --system -r pyproject.toml playwright
+RUN playwright install --with-deps chromium
+COPY backend/ ./backend/
+COPY alembic.ini ./
+# throwaway uid used for per-job tool execution (isolation v1, and as the in-container user for v2)
+RUN groupadd -g 10100 sandbox && useradd -u 10100 -g sandbox -M -s /usr/sbin/nologin sandbox \
+ && mkdir -p /work && chmod 711 /work
+ENV PYTHONPATH=/app/backend

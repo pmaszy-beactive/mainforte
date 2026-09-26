@@ -63,6 +63,18 @@ class Settings(BaseSettings):
     sandbox_work_root: str = Field("/work", alias="SANDBOX_WORK_ROOT")
     sandbox_timeout_seconds: int = Field(60, alias="SANDBOX_TIMEOUT_SECONDS")
 
+    # Isolation v2 (P4 §4): a privilege-separated `sandbox-launcherd` daemon runs each sandboxed
+    # tool call in a throwaway container instead of a runuser-dropped subprocess. `sandbox_backend`
+    # stays "v1" everywhere except production, since local dev has neither `runuser` nor Docker
+    # Desktop guaranteed, and v1 is the only backend that degrades gracefully when its tool is missing.
+    sandbox_backend: str = Field("v1", alias="SANDBOX_BACKEND")
+    sandbox_launcher_socket: str = Field("/var/run/mainforte/launcher.sock", alias="SANDBOX_LAUNCHER_SOCKET")
+    sandbox_container_image: str = Field("mainforte-sandbox:latest", alias="SANDBOX_CONTAINER_IMAGE")
+    sandbox_container_memory_mb: int = Field(1024, alias="SANDBOX_CONTAINER_MEMORY_MB")
+    sandbox_container_cpus: float = Field(1.0, alias="SANDBOX_CONTAINER_CPUS")
+    sandbox_container_pids_limit: int = Field(128, alias="SANDBOX_CONTAINER_PIDS_LIMIT")
+    sandbox_network_name: str = Field("mainforte_sandbox_net", alias="SANDBOX_NETWORK_NAME")
+
     @property
     def jwt_secret(self) -> str:
         return self.auth_secret or self.secret_key

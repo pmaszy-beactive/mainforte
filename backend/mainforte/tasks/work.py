@@ -25,29 +25,23 @@ action claims exactly the way it grounds chat-turn claims.
 """
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
+from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
 from mainforte.config import get_settings
 from mainforte.db.session import db_session
 from mainforte.events import emit
+from mainforte.events.task_qa import run_qa_sync
 from mainforte.homes import sync_home, stage_home
 from mainforte.ids import new_id
+from mainforte.sandbox import get_sandbox
 
 log = logging.getLogger(__name__)
-
-_RUNUSER = shutil.which("runuser")
-if _RUNUSER is None:
-    log.warning(
-        "runuser not found on this host — sandboxed tools will run WITHOUT a uid drop. "
-        "This is expected on local macOS dev; it must never be true inside Dockerfile.worker."
-    )
 
 
 def _job_dir(job_id: str) -> Path:
@@ -72,7 +66,9 @@ def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Pat
                     ws_id: str) -> dict[str, Any]:
     """Stages the workspace's owning user's S3 home into `workspace/home/` before running the
     tool, and syncs it back after — always, success or failure, per PLAN.md's "our own insurance"
-    framing (`finally`, not just the happy path)."""
+    framing (`finally`, not just the happy path). Delegates the actual isolated execution to
+    `sandbox.get_sandbox()` (P4 §4: v1 runuser-subprocess locally, v2 Docker-via-launcherd in
+    production) — this function only owns orchestration that's the same regardless of backend."""
     settings = get_settings()
     home_dir = workspace / "home"
     user_id = _home_owner(ws_id)
@@ -83,13 +79,10 @@ def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Pat
             emit(db, "worker.home.staged", ws_id=ws_id, actor=("system", None), correlation_id=None,
                  payload={"user_id": user_id})
 
-    spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": str(workspace)})
-    argv = [sys.executable, "-m", "mainforte.tools.sandbox_exec"]
-    if _RUNUSER is not None:
-        argv = [_RUNUSER, "-u", str(settings.sandbox_uid), "--", *argv]
     try:
-        proc = subprocess.run(
-            argv, input=spec, capture_output=True, text=True, timeout=settings.sandbox_timeout_seconds,
+        return get_sandbox().run(
+            tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id,
+            home_dir=home_dir, timeout_seconds=settings.sandbox_timeout_seconds,
         )
     finally:
         if user_id is not None:
@@ -97,17 +90,6 @@ def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Pat
             with db_session() as db:
                 emit(db, "worker.home.synced", ws_id=ws_id, actor=("system", None), correlation_id=None,
                      payload={"user_id": user_id})
-
-    if proc.returncode != 0 and not proc.stdout.strip():
-        raise RuntimeError(f"sandbox_exec exited {proc.returncode}: {proc.stderr[-2000:]}")
-    try:
-        out = json.loads(proc.stdout.strip().splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        raise RuntimeError(f"sandbox_exec produced no valid JSON: stdout={proc.stdout[-1000:]!r} "
-                            f"stderr={proc.stderr[-1000:]!r}") from None
-    if not out.get("ok"):
-        raise RuntimeError(out.get("error", "sandboxed tool failed with no error message"))
-    return out["result"]
 
 
 @celery.task(name="mainforte.tasks.work.run_tool", bind=True, acks_late=True,
@@ -206,7 +188,7 @@ def run_task_stage(self, *, task_id: str, ws_id: str) -> None:
         if task is None or task.ws_id != ws_id:
             log.warning("run_task_stage: task %s not found in ws %s", task_id, ws_id)
             return
-        if task.status not in ("approved", "running"):
+        if task.status not in ("approved", "running", "retrying"):
             log.info("run_task_stage: task %s status=%s, not runnable, skipping", task_id, task.status)
             return
         if task.current_stage >= len(task.plan):
@@ -235,6 +217,40 @@ def run_task_stage(self, *, task_id: str, ws_id: str) -> None:
                           "reason": stage.get("prompt", "This task needs your input to continue.")})
         return
 
+    if stage_type == "qa":
+        with db_session() as db:
+            task = db.get(Task, task_id)
+            from mainforte.db.models import Workspace
+
+            ws = db.get(Workspace, ws_id)
+            api_key = get_or_mint(db, ws) if ws is not None else None
+            result = run_qa_sync(db, ws_id=ws_id, base_corr=base_corr, api_key=api_key,
+                                  first_stage=task.last_qa_stage, last_stage=task.current_stage)
+            if result["passed"]:
+                emit(db, "task.qa.passed", ws_id=ws_id, actor=("system", None), correlation_id=stage_corr,
+                     payload={"task_id": task_id, "stage_index": stage_index, "thread_id": thread_id,
+                              "checked_stages": result["checked_stages"]})
+                task.last_qa_stage = task.current_stage
+                emit(db, "task.stage.ended", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
+                     payload={"task_id": task_id, "stage_index": stage_index, "ok": True, "thread_id": thread_id})
+                task.current_stage = stage_index + 1
+                advance = task.current_stage < len(task.plan)
+                if not advance:
+                    task.status = "completed"
+                    emit(db, "task.completed", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
+                         payload={"task_id": task_id, "thread_id": thread_id})
+            else:
+                emit(db, "task.qa.failed", ws_id=ws_id, actor=("system", None), correlation_id=stage_corr,
+                     payload={"task_id": task_id, "stage_index": stage_index, "thread_id": thread_id,
+                              "checked_stages": result["checked_stages"], "unverified": result["unverified"]})
+                task.status = "qa_failed"
+                emit(db, "task.stage.ended", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
+                     payload={"task_id": task_id, "stage_index": stage_index, "ok": False, "thread_id": thread_id})
+                advance = False
+        if advance:
+            run_task_stage.delay(task_id=task_id, ws_id=ws_id)
+        return
+
     if stage_type != "tool":
         with db_session() as db:
             task = db.get(Task, task_id)
@@ -249,19 +265,35 @@ def run_task_stage(self, *, task_id: str, ws_id: str) -> None:
         correlation_id=stage_corr, thread_id=thread_id, persona_id=persona_id,
     )
 
-    with db_session() as db:
-        task = db.get(Task, task_id)
-        if not outcome["ok"] and not stage.get("continue_on_error"):
-            task.status = "failed"
+    if not outcome["ok"] and not stage.get("continue_on_error"):
+        from mainforte.tasks.healing import MAX_STAGE_RETRIES, is_retryable_stage_error
+
+        error_message = outcome.get("error", "stage failed")
+        retryable = is_retryable_stage_error(error_message=error_message)
+        with db_session() as db:
+            task = db.get(Task, task_id)
             emit(db, "task.stage.ended", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
                  payload={"task_id": task_id, "stage_index": stage_index, "ok": False, "thread_id": thread_id})
-            emit(db, "task.failed", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
-                 payload={"task_id": task_id, "stage_index": stage_index, "thread_id": thread_id,
-                          "message": outcome.get("error", "stage failed")})
-            return
+            if retryable and task.attempt < MAX_STAGE_RETRIES:
+                task.attempt += 1
+                task.status = "retrying"
+                attempt = task.attempt
+            else:
+                task.status = "failed"
+                emit(db, "task.failed", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
+                     payload={"task_id": task_id, "stage_index": stage_index, "thread_id": thread_id,
+                              "message": error_message})
+                attempt = None
+        if attempt is not None:
+            raise self.retry(countdown=min(2 ** attempt * 5, 300))
+        return
+
+    with db_session() as db:
+        task = db.get(Task, task_id)
         emit(db, "task.stage.ended", ws_id=ws_id, actor=("system", None), correlation_id=base_corr,
              payload={"task_id": task_id, "stage_index": stage_index, "ok": outcome["ok"], "thread_id": thread_id})
         task.current_stage = stage_index + 1
+        task.attempt = 0
         advance = task.current_stage < len(task.plan)
         if not advance:
             task.status = "completed"
@@ -270,3 +302,32 @@ def run_task_stage(self, *, task_id: str, ws_id: str) -> None:
 
     if advance:
         run_task_stage.delay(task_id=task_id, ws_id=ws_id)
+
+
+@celery.task(name="mainforte.tasks.work.fire_scheduled_task")
+def fire_scheduled_task(*, task_id: str) -> str | None:
+    """Fires one occurrence of a recurring `Task` template (`status="scheduled"`): clones
+    `plan`/`persona_id`/`thread_id` into a fresh run row rather than resetting the template in
+    place (see `tasks/schedule.py`'s module docstring for why). The run row carries
+    `result.schedule_template_id` back to the template so `tasks/schedule.py`'s `task.completed`/
+    `task.failed` handlers can find their way back and update `next_run_at`/`consecutive_failures`.
+    Recurring runs skip the per-occurrence approval gate -- the human approved the recurrence
+    itself when they attached the schedule -- so the new row starts `status="approved"`."""
+    from mainforte.db.models import Task
+
+    with db_session() as db:
+        template = db.get(Task, task_id)
+        if template is None or template.status != "scheduled" or not (template.schedule or {}).get("active"):
+            return None
+        run_id = new_id()
+        run = Task(
+            id=run_id, ws_id=template.ws_id, thread_id=template.thread_id, persona_id=template.persona_id,
+            status="approved", plan=template.plan, current_stage=0,
+            result={"schedule_template_id": task_id}, correlation_id=run_id,
+        )
+        db.add(run)
+        emit(db, "task.scheduled", ws_id=template.ws_id, actor=("system", None), correlation_id=template.correlation_id,
+             payload={"task_id": run_id, "template_task_id": task_id, "thread_id": template.thread_id})
+
+    run_task_stage.delay(task_id=run_id, ws_id=template.ws_id)
+    return run_id

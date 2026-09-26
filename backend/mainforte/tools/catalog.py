@@ -161,12 +161,15 @@ _register(Tool(
 
 def _create_task(*, ws_id: str, title: str, plan: list[dict[str, Any]],
                   thread_id: str | None = None, persona_id: str | None = None,
-                  correlation_id: str | None = None) -> dict[str, Any]:
+                  correlation_id: str | None = None, schedule: dict[str, Any] | None = None) -> dict[str, Any]:
     """In-process handler for the `create_task` tool: creates a `Task` row in `planned` status
     and requests human approval. Deliberately does NOT auto-approve — every task, however it was
     proposed, waits for a `POST .../approve` before `run_task_stage` ever runs (see Phase 5 of
     the P2 plan: task.planned -> task.approval.requested -> task.approved is a hard gate, not a
-    default-on convenience)."""
+    default-on convenience). An optional `schedule` proposes recurrence up front (P4) -- it's stored
+    on the row now but stays inert (`set_task_schedule` doesn't flip status to "scheduled" until
+    approval; see the `/approve` route) since the same approval gate must apply to recurring work,
+    not just its first run."""
     from mainforte.db.models import Task
     from mainforte.db.session import db_session
     from mainforte.events import emit
@@ -179,6 +182,11 @@ def _create_task(*, ws_id: str, title: str, plan: list[dict[str, Any]],
             id=task_id, ws_id=ws_id, thread_id=thread_id, persona_id=persona_id,
             status="planned", plan=plan, current_stage=0, result=None, correlation_id=corr,
         )
+        if schedule is not None:
+            from mainforte.tasks.schedule import set_task_schedule
+
+            set_task_schedule(db, task, schedule)
+            task.status = "planned"  # set_task_schedule sets "scheduled"; approval gate still applies first
         db.add(task)
         db.flush()
         emit(db, "task.planned", ws_id=ws_id, actor=("persona", persona_id), correlation_id=corr,
@@ -216,6 +224,20 @@ _register(Tool(
                     },
                     "required": ["type"],
                 },
+            },
+            "schedule": {
+                "type": "object",
+                "description": (
+                    "Optional recurrence to propose alongside this task, e.g. \"every morning\". "
+                    "Surfaced to the human as part of the approval request; only takes effect once "
+                    "approved, same as the task itself."
+                ),
+                "properties": {
+                    "kind": {"type": "string", "enum": ["interval", "cron"]},
+                    "interval_seconds": {"type": "integer", "description": "Required when kind=interval"},
+                    "cron": {"type": "string", "description": "5-field cron string, required when kind=cron"},
+                },
+                "required": ["kind"],
             },
         },
         "required": ["title", "plan"],

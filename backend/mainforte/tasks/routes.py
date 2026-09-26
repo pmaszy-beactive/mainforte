@@ -20,9 +20,15 @@ class InputIn(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class ScheduleIn(BaseModel):
+    kind: str = Field(pattern="^(interval|cron)$")
+    interval_seconds: int | None = Field(default=None, gt=0)
+    cron: str | None = None
+
+
 def _task_out(t: Task) -> dict:
     return {"id": t.id, "status": t.status, "plan": t.plan, "current_stage": t.current_stage,
-            "thread_id": t.thread_id, "persona_id": t.persona_id, "result": t.result}
+            "thread_id": t.thread_id, "persona_id": t.persona_id, "result": t.result, "schedule": t.schedule}
 
 
 def _get_task(workspace_id: str, task_id: str, db: Session) -> Task:
@@ -88,3 +94,44 @@ def submit_input(workspace_id: str, task_id: str, body: InputIn, ident: Identity
     db.commit()
     run_task_stage.delay(task_id=task_id, ws_id=ws.id)
     return {"event_id": ev["id"], "status": task.status}
+
+
+@router.post("/{task_id}/schedule", status_code=202)
+def set_schedule(workspace_id: str, task_id: str, body: ScheduleIn, ident: Identity = Depends(current_identity),
+                  db: Session = Depends(get_db)):
+    """Attaches recurrence to an existing task, turning it into a template row (status="scheduled")
+    that `refresh_due_tasks` will fan out from at its own `next_run_at` — see `tasks/schedule.py`."""
+    from mainforte.tasks.schedule import set_task_schedule
+
+    ws = require_membership(workspace_id, ident, db)
+    task = _get_task(workspace_id, task_id, db)
+    try:
+        set_task_schedule(db, task, body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from e
+    ev = emit(db, "task.scheduled", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
+              correlation_id=task.correlation_id,
+              payload={"task_id": task_id, "template_task_id": task_id, "thread_id": task.thread_id,
+                       "schedule": task.schedule})
+    return {"event_id": ev["id"], "status": task.status, "schedule": task.schedule}
+
+
+@router.delete("/{task_id}/schedule", status_code=202)
+def clear_schedule(workspace_id: str, task_id: str, ident: Identity = Depends(current_identity),
+                    db: Session = Depends(get_db)):
+    """Disables recurrence. Leaves the row and its `schedule` blob in place (just `active: false`)
+    rather than clearing `task.schedule`/reverting `status` -- `_record_run_outcome`'s failure path
+    (`tasks/schedule.py`) already disables this exact same way, so `refresh_due_tasks`'s
+    `schedule.active == 'true'` filter is the single source of truth for "will this fire again",
+    and history (kind/cron/consecutive_failures) survives for the user to inspect or re-enable."""
+    from mainforte.tasks.schedule import _disable_schedule
+
+    ws = require_membership(workspace_id, ident, db)
+    task = _get_task(workspace_id, task_id, db)
+    if not task.schedule:
+        raise HTTPException(status.HTTP_409_CONFLICT, "task has no schedule")
+    _disable_schedule(task)
+    ev = emit(db, "task.disabled", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
+              correlation_id=task.correlation_id,
+              payload={"task_id": task_id, "thread_id": task.thread_id, "reason": "canceled by user"})
+    return {"event_id": ev["id"], "status": task.status, "schedule": task.schedule}

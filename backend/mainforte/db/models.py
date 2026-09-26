@@ -197,12 +197,19 @@ class Task(IdMixin, TimestampMixin, Base):
     ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     thread_id: Mapped[str | None] = mapped_column(String(26), index=True)
     persona_id: Mapped[str | None] = mapped_column(ForeignKey("personas.id", ondelete="CASCADE"), index=True)
-    # planned|approved|running|blocked|qa|completed|failed|canceled
+    # planned|approved|running|blocked|qa_failed|retrying|scheduled|completed|failed|canceled
     status: Mapped[str] = mapped_column(String(20), default="planned", nullable=False)
     plan: Mapped[list[Any]] = mapped_column(JSONB, default=list, nullable=False)
     current_stage: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     correlation_id: Mapped[str | None] = mapped_column(String(26), index=True)
+    # P4: checkpoint of which stages [0, last_qa_stage) have already had a "qa" stage ground them.
+    last_qa_stage: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # P4: task-scoped retry counter (not Celery's own, which doesn't survive a worker restart).
+    attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # P4: {"kind": "interval"|"cron", "interval_seconds"|"cron", "next_run_at", "active", "consecutive_failures"}
+    # set on a template row (status="scheduled"); each firing clones plan/persona_id/thread_id into a new run row.
+    schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 # ---------------------------------------------------------------- widgets

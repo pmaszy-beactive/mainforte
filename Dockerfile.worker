@@ -1,21 +1,4 @@
 # Fat agent-worker image: python + chromium (playwright) + node + tools. Consumes chat,work,system queues.
-FROM python:3.12-slim-bookworm
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 UV_SYSTEM_PYTHON=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq ripgrep sqlite3 postgresql-client poppler-utils zstd tini \
-      nodejs npm util-linux \
- && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-WORKDIR /app
-COPY pyproject.toml ./
-RUN uv pip install --system -r pyproject.toml playwright
-RUN playwright install --with-deps chromium
-COPY backend/ ./backend/
-COPY alembic.ini ./
-# throwaway uid used for per-job tool execution (isolation v1)
-RUN groupadd -g 10100 sandbox && useradd -u 10100 -g sandbox -M -s /usr/sbin/nologin sandbox \
- && mkdir -p /work && chmod 711 /work
-ENV PYTHONPATH=/app/backend
+FROM mainforte-base
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["celery", "-A", "mainforte.celery_app", "worker", "--loglevel=info", "-Q", "chat,work,system"]
