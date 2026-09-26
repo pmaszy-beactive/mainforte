@@ -30,6 +30,7 @@ celery.conf.update(
         "mainforte.tasks.chat.*": {"queue": "chat"},
         "mainforte.tasks.work.*": {"queue": "work"},
         "mainforte.tasks.system.*": {"queue": "system"},
+        "mainforte.tasks.billing.*": {"queue": "system"},
     },
     beat_schedule={
         "worker-heartbeat": {"task": "mainforte.tasks.system.worker_heartbeat", "schedule": 30.0},
@@ -37,8 +38,9 @@ celery.conf.update(
         "sweep-auth-tokens": {"task": "mainforte.tasks.system.sweep_auth_tokens", "schedule": 3600.0},
         "rollup-threads": {"task": "mainforte.tasks.system.rollup_threads", "schedule": crontab(hour=6, minute=0)},
         "refresh-due-widgets": {"task": "mainforte.tasks.system.refresh_due_widgets", "schedule": 300.0},
+        "reconcile-subscriptions": {"task": "mainforte.tasks.billing.reconcile_subscriptions", "schedule": 3600.0},
     },
-    imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work"),
+    imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work", "mainforte.tasks.billing"),
 )
 
 

@@ -242,6 +242,34 @@
     "title": "Facturation",
     "subtitle": "Forfait, carte et utilisation.",
     "choose": "Choisir",
+    "current": "Forfait actuel",
+    "trial": "Essai",
+    "perMonth": "/mois",
+    "status": {
+      "incomplete": "Paiement incomplet",
+      "requires_action": "Action requise",
+      "active": "Actif",
+      "past_due": "En retard",
+      "canceled": "Annulé",
+      "unpaid": "Impayé"
+    },
+    "card": {
+      "title": "Moyen de paiement",
+      "none": "Aucune carte enregistrée.",
+      "onFile": "Carte enregistrée.",
+      "save": "Enregistrer la carte",
+      "saving": "Enregistrement…",
+      "saved": "Carte enregistrée."
+    },
+    "subscribe": "S'abonner",
+    "subscribing": "Abonnement en cours…",
+    "subscribeNeedsCard": "Enregistrez une carte avant de vous abonner.",
+    "cancel": "Annuler le forfait",
+    "canceling": "Annulation…",
+    "cancelAtPeriodEnd": "Votre forfait sera annulé à la fin de la période de facturation en cours.",
+    "renewsOn": "Renouvellement le {{date}}",
+    "requiresAction": "Votre paiement nécessite une vérification supplémentaire.",
+    "confirmAction": "Confirmer le paiement",
     "placeholder": "La carte, les factures et l'utilisation apparaîtront ici une fois la facturation activée."
   },
   "admin": {

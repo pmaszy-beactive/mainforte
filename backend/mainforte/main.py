@@ -13,6 +13,8 @@ from sqlalchemy import text
 from mainforte.admin.routes import router as admin_router
 from mainforte.auth.routes import me_router
 from mainforte.auth.routes import router as auth_router
+from mainforte.billing.routes import router as billing_router
+from mainforte.billing.webhooks import router as stripe_webhook_router
 from mainforte.chat.routes import router as chat_router
 from mainforte.config import get_settings
 from mainforte.db.models import ApiError
@@ -31,12 +33,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("mainforte")
 settings = get_settings()
 
-app = FastAPI(title="Mainforte", version="0.1.2", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="Mainforte", version="0.1.3", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth_router, me_router, ws_router, chat_router, personas_router, admin_router, socket_router,
-          tasks_router, widgets_router):
+          tasks_router, widgets_router, billing_router, stripe_webhook_router):
     app.include_router(r)
 
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, current_identity, require_membership
 from mainforte.auth.service import create_user
+from mainforte.billing.gating import require_member_capacity
 from mainforte.db.models import Event, Membership, User, Workspace
 from mainforte.db.session import get_db
 from mainforte.events import emit
@@ -57,6 +58,7 @@ def add_member(workspace_id: str, body: MemberIn, ident: Identity = Depends(curr
     ws = require_membership(workspace_id, ident, db, roles={"owner", "admin"})
     if body.role not in {"admin", "member"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "role must be admin or member")
+    require_member_capacity(db, ws)
     user = db.query(User).filter_by(email=body.email.lower()).first() or create_user(db, email=body.email, actor=("user", ident.real_user.id))
     if db.query(Membership).filter_by(workspace_id=ws.id, user_id=user.id).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "already a member")

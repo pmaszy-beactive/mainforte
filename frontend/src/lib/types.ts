@@ -151,3 +151,41 @@ export interface AdminWorkers {
   desired: number;
   workers: { id: string; status: string; node: string; last_heartbeat: string; current_job: string | null }[];
 }
+
+/* Billing */
+export interface BillingPrice {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  interval: string;
+}
+
+export interface BillingPlan {
+  id: string;
+  slug: string;
+  name: string;
+  features: Record<string, unknown>;
+  prices: BillingPrice[];
+}
+
+export type BillingSubscriptionStatus =
+  | "incomplete"
+  | "requires_action"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid";
+
+export interface BillingSubscription {
+  id: string;
+  plan_id: string;
+  status: BillingSubscriptionStatus;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface BillingState {
+  plans: BillingPlan[];
+  subscription: BillingSubscription | null;
+  has_card: boolean;
+}

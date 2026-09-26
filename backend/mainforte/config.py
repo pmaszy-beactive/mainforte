@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     stripe_secret_key: str | None = Field(None, alias="STRIPE_SECRET_KEY")
     stripe_publishable_key: str | None = Field(None, alias="VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY")
+    stripe_webhook_secret: str | None = Field(None, alias="STRIPE_WEBHOOK_SECRET")
 
     s3_endpoint: str | None = Field(None, alias="S3_ENDPOINT")
     s3_api_key: str | None = Field(None, alias="S3_API_KEY")

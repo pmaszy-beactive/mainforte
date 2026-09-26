@@ -60,8 +60,12 @@ class Workspace(IdMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    # denormalized cache of the effective plan slug (trial|good|better|best); real gating reads
+    # subscriptions.status, this column is a fast-path display/routing hint only.
     plan: Mapped[str] = mapped_column(String(40), default="trial", nullable=False)
     ai_proxy_key_enc: Mapped[str | None] = mapped_column(Text)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    stripe_payment_method_id: Mapped[str | None] = mapped_column(String(64))
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
@@ -220,6 +224,90 @@ class Widget(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)  # active|disabled
     refresh_spec: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     token: Mapped[str] = mapped_column(String(26), nullable=False, unique=True, index=True)
+
+
+# ---------------------------------------------------------------- billing (P3)
+
+
+class Plan(IdMixin, TimestampMixin, Base):
+    """A plan tier we sell (PLAN.md P3). Ours, not a Stripe Dashboard object — subscriptions are
+    created with inline price_data/coupon drawn from these rows, never a Stripe product/price id."""
+
+    __tablename__ = "plans"
+
+    slug: Mapped[str] = mapped_column(String(40), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)  # active|retired
+    features: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    prices: Mapped[list[Price]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+
+
+class Price(IdMixin, TimestampMixin, Base):
+    """A price point a plan has been sold at. Kept separate from Plan so an existing subscription
+    keeps the price it signed up under even if the plan's current price changes later."""
+
+    __tablename__ = "prices"
+    __table_args__ = (Index("ix_prices_plan_status", "plan_id", "status"),)
+
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="usd", nullable=False)
+    interval: Mapped[str] = mapped_column(String(20), default="month", nullable=False)  # month|year
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)  # active|retired
+
+    plan: Mapped[Plan] = relationship(back_populates="prices")
+
+
+class Coupon(IdMixin, TimestampMixin, Base):
+    """Ours, applied ad hoc onto a Stripe subscription at creation time (never a Stripe coupon id)."""
+
+    __tablename__ = "coupons"
+
+    code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # percent|amount
+    percent_off: Mapped[int | None] = mapped_column(Integer)
+    amount_off_cents: Mapped[int | None] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(10), default="usd", nullable=False)
+    duration: Mapped[str] = mapped_column(String(20), default="once", nullable=False)  # once|repeating|forever
+    duration_in_months: Mapped[int | None] = mapped_column(Integer)
+    max_redemptions: Mapped[int | None] = mapped_column(Integer)
+    redeemed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)  # active|disabled
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Subscription(IdMixin, TimestampMixin, Base):
+    """A workspace's subscription to a plan/price. `status` is the real gating source of truth
+    (never Workspace.plan). Reconciled hourly and on-login via sync_subscription_from_stripe, the
+    same function the webhook handler calls, so the two paths can never race into disagreement."""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = (Index("ix_subscriptions_ws_status", "ws_id", "status", "created_at"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False, index=True)
+    price_id: Mapped[str] = mapped_column(ForeignKey("prices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    coupon_id: Mapped[str | None] = mapped_column(ForeignKey("coupons.id", ondelete="SET NULL"), index=True)
+    stripe_subscription_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    stripe_customer_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # incomplete|active|past_due|canceled|unpaid|requires_action
+    status: Mapped[str] = mapped_column(String(20), default="incomplete", nullable=False)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    latest_invoice_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class StripeEvent(IdMixin, Base):
+    """Webhook idempotency ledger: one row per processed Stripe event id."""
+
+    __tablename__ = "stripe_events"
+
+    stripe_event_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String(80), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
 # ---------------------------------------------------------------- ops

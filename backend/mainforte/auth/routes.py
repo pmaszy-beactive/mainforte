@@ -60,6 +60,12 @@ class ResetIn(BaseModel):
 def _session_response(db: Session, user: User, *, method: str) -> dict:
     user.last_login_at = utcnow()
     emit(db, "session.login", user_id=user.id, actor=("user", user.id), payload={"method": method})
+    db.commit()
+    from mainforte.tasks.billing import reconcile_workspace_task
+
+    ws_ids = [row[0] for row in db.query(Membership.workspace_id).filter_by(user_id=user.id).all()]
+    for ws_id in ws_ids:
+        reconcile_workspace_task.delay(ws_id=ws_id)
     return {"token": mint_session(user.id), "user": public_user(user)}
 
 

@@ -6,6 +6,8 @@ import type {
   AdminUser,
   AdminWorkers,
   AuthResponse,
+  BillingState,
+  BillingSubscription,
   ChatPostResponse,
   Me,
   Task,
@@ -137,6 +139,18 @@ export const api = {
   },
   widgets: {
     list: (wsId: string) => get<Widget[]>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets`),
+  },
+  billing: {
+    get: (wsId: string) => get<BillingState>(`/api/workspaces/${encodeURIComponent(wsId)}/billing`),
+    createSetupIntent: (wsId: string) =>
+      post<{ client_secret: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/setup-intent`),
+    confirmSetupIntent: (wsId: string, setupIntentId: string) =>
+      post<{ ok: boolean }>(
+        `/api/workspaces/${encodeURIComponent(wsId)}/billing/setup-intent/confirm${qs({ setup_intent_id: setupIntentId })}`,
+      ),
+    subscribe: (wsId: string, b: { price_id: string; coupon_code?: string | null }) =>
+      post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/subscribe`, b),
+    cancel: (wsId: string) => post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/cancel`),
   },
   admin: {
     users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),

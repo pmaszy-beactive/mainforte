@@ -242,6 +242,34 @@
     "title": "Billing",
     "subtitle": "Plan, card and usage.",
     "choose": "Choose",
+    "current": "Current plan",
+    "trial": "Trial",
+    "perMonth": "/mo",
+    "status": {
+      "incomplete": "Payment incomplete",
+      "requires_action": "Action required",
+      "active": "Active",
+      "past_due": "Past due",
+      "canceled": "Canceled",
+      "unpaid": "Unpaid"
+    },
+    "card": {
+      "title": "Payment method",
+      "none": "No card on file.",
+      "onFile": "Card on file.",
+      "save": "Save card",
+      "saving": "Saving…",
+      "saved": "Card saved."
+    },
+    "subscribe": "Subscribe",
+    "subscribing": "Subscribing…",
+    "subscribeNeedsCard": "Save a card before subscribing.",
+    "cancel": "Cancel plan",
+    "canceling": "Canceling…",
+    "cancelAtPeriodEnd": "Your plan will cancel at the end of the current billing period.",
+    "renewsOn": "Renews on {{date}}",
+    "requiresAction": "Your payment needs additional verification.",
+    "confirmAction": "Confirm payment",
     "placeholder": "Card, invoices and usage will appear here once billing is enabled."
   },
   "admin": {

@@ -4,12 +4,12 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import Numeric, func
+from sqlalchemy import Numeric, case, func
 from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, require_superuser
 from mainforte.db.base import utcnow
-from mainforte.db.models import AgentWorker, ApiError, Event, Membership, Setting, User, Workspace
+from mainforte.db.models import AgentWorker, ApiError, Event, Membership, Price, Setting, Subscription, User, Workspace
 from mainforte.db.session import get_db
 from mainforte.events.bus import to_dict
 from mainforte.events.types import EVENT_TYPES
@@ -32,9 +32,25 @@ def users(q: str = "", limit: int = Query(100, le=500), db: Session = Depends(ge
 
 @router.get("/finances")
 def finances(db: Session = Depends(get_db)):
-    # P3 fills mrr/subscriptions/charged from the Stripe reconcile job; ai_cost_usd and
-    # usage_by_workspace are real, summed from billing.usage.recorded events.
+    # mrr/active_subscriptions/failed_payments read subscriptions.status, the real gating source
+    # of truth (never Workspace.plan) — kept in sync by the webhook + hourly/on-login reconcile job.
     plan_counts = dict(db.query(Workspace.plan, func.count()).group_by(Workspace.plan).all())
+
+    monthly_amount = case(
+        (Price.interval == "year", Price.amount_cents / 12.0),
+        else_=Price.amount_cents,
+    )
+    mrr_cents = (
+        db.query(func.coalesce(func.sum(monthly_amount), 0))
+        .select_from(Subscription)
+        .join(Price, Price.id == Subscription.price_id)
+        .filter(Subscription.status == "active")
+        .scalar()
+    )
+    active_subscriptions = db.query(func.count()).filter(Subscription.status == "active").scalar() or 0
+    failed_payments = (
+        db.query(func.count()).filter(Subscription.status.in_(["past_due", "unpaid"])).scalar() or 0
+    )
 
     cost_expr = func.sum(func.cast(Event.payload["cost_usd"].astext, Numeric))
     in_tok_expr = func.sum(func.cast(Event.payload["input_tokens"].astext, Numeric))
@@ -54,8 +70,9 @@ def finances(db: Session = Depends(get_db)):
     ]
     ai_cost_usd = sum(row["cost_usd"] for row in usage_by_workspace)
 
-    return {"mrr_cents": 0, "active_subscriptions": 0, "failed_payments": 0, "ai_cost_usd": ai_cost_usd,
-            "ai_charged_usd": 0.0, "workspaces_by_plan": plan_counts, "usage_by_workspace": usage_by_workspace}
+    return {"mrr_cents": int(round(mrr_cents)), "active_subscriptions": active_subscriptions,
+            "failed_payments": failed_payments, "ai_cost_usd": ai_cost_usd, "ai_charged_usd": 0.0,
+            "workspaces_by_plan": plan_counts, "usage_by_workspace": usage_by_workspace}
 
 
 @router.get("/errors")
