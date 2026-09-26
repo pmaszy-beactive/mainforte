@@ -114,6 +114,8 @@ EVENT_TYPES: dict[str, str] = {
     "worker.job.released": "Worker released a job",
     "worker.home.staged": "Worker staged a user home from S3",
     "worker.home.synced": "Worker synced a user home to S3",
+    "worker.provisioning": "Reconciler triggered a Jenkins job to provision a worker",
+    "worker.destroying": "Reconciler triggered a Jenkins job to destroy a worker",
     # system
     "system.error": "Unhandled error",
     "system.outbox.redispatched": "Outbox sweeper re-dispatched undelivered events",
