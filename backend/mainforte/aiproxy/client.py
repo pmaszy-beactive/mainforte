@@ -74,7 +74,9 @@ def ensure_app(*, app_slug: str, name: str) -> str:
             # already exists: look it up
             listing = c.get("/admin/apps", headers=_admin_headers())
             listing.raise_for_status()
-            for app in listing.json().get("apps", listing.json() if isinstance(listing.json(), list) else []):
+            body = listing.json()
+            apps = body if isinstance(body, list) else body.get("apps", [])
+            for app in apps:
                 if app.get("slug") == app_slug:
                     return app["id"]
         r.raise_for_status()
@@ -101,18 +103,36 @@ def _tenant_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}", "x-api-key": api_key, "content-type": "application/json"}
 
 
+@dataclass
+class ToolUseBlock:
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
 async def stream_reply(
     *, api_key: str, model: str, system: str, messages: list[dict[str, Any]], max_tokens: int = 2048,
-    usage_sink: dict[str, int] | None = None,
+    usage_sink: dict[str, int] | None = None, tools: list[dict[str, Any]] | None = None,
+    tool_use_sink: list[ToolUseBlock] | None = None, stop_reason_sink: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
     """Yields text deltas from POST /v1/messages (Anthropic Messages shape, SSE). Raises AiProxyError
     on non-2xx, with retry_after populated for 429s so the caller can back off.
 
     If `usage_sink` is given, it is mutated in place with {"input_tokens", "output_tokens"} once
     known (input from message_start, output from message_delta) — a generator can't also return a
-    value, and this avoids changing the yield type for the two existing callers."""
+    value, and this avoids changing the yield type for the two existing callers.
+
+    If `tools` is given, it's passed through as the Messages API `tools` param. Completed
+    `tool_use` blocks (accumulated across `content_block_start`/`content_block_delta`/
+    `content_block_stop`, matching Anthropic's streaming shape for that block type — the `input`
+    arrives as a stream of partial_json deltas, not one shot) are appended to `tool_use_sink` if
+    given. `stop_reason_sink`, if given, gets `{"stop_reason": ...}` from message_delta so the
+    caller can tell "stopped for tool use" apart from "stopped, done" without re-deriving it."""
     url = _ai_root() + "/v1/messages"
-    body = {"model": model, "system": system, "messages": messages, "max_tokens": max_tokens, "stream": True}
+    body: dict[str, Any] = {"model": model, "system": system, "messages": messages, "max_tokens": max_tokens, "stream": True}
+    if tools:
+        body["tools"] = tools
+    pending_blocks: dict[int, dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0)) as c:
         async with c.stream("POST", url, headers=_tenant_headers(api_key), json=body) as resp:
             if resp.status_code != 200:
@@ -133,24 +153,49 @@ async def stream_reply(
                     evt = json.loads(data)
                 except json.JSONDecodeError:
                     continue
-                if evt.get("type") == "content_block_delta":
+                evt_type = evt.get("type")
+                if evt_type == "content_block_delta":
                     delta = evt.get("delta", {})
                     text = delta.get("text")
                     if text:
                         yield text
-                elif evt.get("type") == "message_start":
+                    elif delta.get("type") == "input_json_delta":
+                        idx = evt.get("index")
+                        block = pending_blocks.get(idx)
+                        if block is not None:
+                            block["json"] += delta.get("partial_json", "")
+                elif evt_type == "content_block_start":
+                    block = evt.get("content_block", {})
+                    if block.get("type") == "tool_use":
+                        pending_blocks[evt.get("index")] = {
+                            "id": block.get("id", ""), "name": block.get("name", ""), "json": "",
+                        }
+                elif evt_type == "content_block_stop":
+                    block = pending_blocks.pop(evt.get("index"), None)
+                    if block is not None and tool_use_sink is not None:
+                        try:
+                            parsed_input = json.loads(block["json"]) if block["json"] else {}
+                        except json.JSONDecodeError:
+                            log.warning("tool_use block %s had unparseable input json: %r", block["id"], block["json"])
+                            parsed_input = {}
+                        tool_use_sink.append(ToolUseBlock(id=block["id"], name=block["name"], input=parsed_input))
+                elif evt_type == "message_start":
                     if usage_sink is not None:
                         usage = (evt.get("message") or {}).get("usage") or {}
                         if "input_tokens" in usage:
                             usage_sink["input_tokens"] = usage["input_tokens"]
-                elif evt.get("type") == "message_delta":
+                elif evt_type == "message_delta":
                     if usage_sink is not None:
                         usage = evt.get("usage") or {}
                         if "output_tokens" in usage:
                             usage_sink["output_tokens"] = usage["output_tokens"]
-                elif evt.get("type") == "message_stop":
+                    if stop_reason_sink is not None:
+                        stop_reason = (evt.get("delta") or {}).get("stop_reason")
+                        if stop_reason:
+                            stop_reason_sink["stop_reason"] = stop_reason
+                elif evt_type == "message_stop":
                     return
-                elif evt.get("type") == "error":
+                elif evt_type == "error":
                     raise AiProxyError(str(evt.get("error")))
 
 

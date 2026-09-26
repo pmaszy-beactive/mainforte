@@ -179,6 +179,28 @@ class Memory(IdMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(40), default="concierge", nullable=False)  # concierge|persona|rollup|user
 
 
+# ---------------------------------------------------------------- tasks
+
+
+class Task(IdMixin, TimestampMixin, Base):
+    """One agentic task run (PLAN.md §1.5): a plan of stages a worker executes, with room to pause
+    for human input (`status="blocked"`) and resume. `plan` is an ordered list of stage specs
+    (shape owned by the task-pipeline code, not the DB); `current_stage` indexes into it."""
+
+    __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_ws_status", "ws_id", "status", "created_at"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    thread_id: Mapped[str | None] = mapped_column(String(26), index=True)
+    persona_id: Mapped[str | None] = mapped_column(ForeignKey("personas.id", ondelete="CASCADE"), index=True)
+    # planned|approved|running|blocked|qa|completed|failed|canceled
+    status: Mapped[str] = mapped_column(String(20), default="planned", nullable=False)
+    plan: Mapped[list[Any]] = mapped_column(JSONB, default=list, nullable=False)
+    current_stage: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    correlation_id: Mapped[str | None] = mapped_column(String(26), index=True)
+
+
 # ---------------------------------------------------------------- ops
 
 

@@ -37,7 +37,7 @@ celery.conf.update(
         "sweep-auth-tokens": {"task": "mainforte.tasks.system.sweep_auth_tokens", "schedule": 3600.0},
         "rollup-threads": {"task": "mainforte.tasks.system.rollup_threads", "schedule": crontab(hour=6, minute=0)},
     },
-    imports=("mainforte.tasks.events", "mainforte.tasks.system"),
+    imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work"),
 )
 
 

@@ -1,10 +1,14 @@
 """The Governor (PLAN.md §1.5a): checks LLM output against reality instead of trusting it outright.
 
-P1 slice only: claim extraction + fact/memory contradiction checks. No tool/agent-work events exist
-yet, so action-claim grounding and the hold-and-reprompt loop are P2 (see governor.reply.held /
-.corrected, unused until then). Runs on the `system` queue, after the reply is already durable —
-this is a check on a reply that has been emitted, not a gate in front of the client (see PLAN.md
-open items: latency/cost is measured before this is moved earlier in the pipeline).
+Fact/memory claims: post-hoc, async, non-gating — this module's `_govern()` runs on the `system`
+queue after `persona.reply.ended`, checking a reply that's already durable and already shown to
+the user (see PLAN.md open items: latency/cost of moving this earlier hasn't been measured).
+
+Action claims (P2): gated, not post-hoc. `ground_action_claims()` below is called synchronously
+from `personas/router.py::run_reply`, before the reply is released, because grounding needs real
+`tool.ended`/`agent.work.ended` events (P2 Phase 3) sharing the turn's `correlation_id` — and
+because "claimed to do something it didn't do" is the one class of claim that must not reach the
+user unfixed. `govern_persona_reply` below no longer touches action claims at all; it's fact-only.
 """
 from __future__ import annotations
 
@@ -103,6 +107,62 @@ async def _verify_fact_llm(*, api_key: str, claim_text: str, context: str, ws_id
     return verdict, str(d.get("reason", ""))[:300]
 
 
+def _claim_overlaps(claim_text: str, haystack: str) -> bool:
+    claim_lower = claim_text.lower()
+    hay_lower = haystack.lower()
+    return claim_lower in hay_lower or hay_lower in claim_lower
+
+
+async def ground_action_claims(db, *, ws_id: str, correlation_id: str | None, api_key: str | None,
+                                claims: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Grounds `type: "action"` claims against this turn's own `tool.ended`/`agent.work.ended`
+    events (matched by `correlation_id`, the linkage P2 Phase 3 guarantees). Pure w.r.t. events —
+    callers decide what to emit. Returns one result dict per action claim in `claims`, each:
+    `{claim, verified, method, reason}`. Non-action claims in `claims` are skipped (not returned)."""
+    action_claims = [c for c in claims if c.get("type") == "action"]
+    if not action_claims:
+        return []
+
+    grounding_events = (
+        db.query(Event)
+        .filter(Event.correlation_id == correlation_id, Event.type.in_(("tool.ended", "agent.work.ended")))
+        .order_by(Event.id.asc()).all()
+    ) if correlation_id else []
+
+    results: list[dict[str, Any]] = []
+    if not grounding_events:
+        for claim in action_claims:
+            results.append({"claim": claim, "verified": False, "method": None,
+                             "reason": "no tool/agent-work events for this turn"})
+        return results
+
+    event_text = "\n".join(
+        f"{ev.type} name={ev.payload.get('name', '')} result={ev.payload.get('result', '')}"
+        for ev in grounding_events
+    )
+    for claim in action_claims:
+        if any(_claim_overlaps(claim["text"], line) for line in event_text.splitlines() if line.strip()):
+            results.append({"claim": claim, "verified": True, "method": "grounded-deterministic", "reason": None})
+            continue
+        if api_key is None:
+            results.append({"claim": claim, "verified": False, "method": None,
+                             "reason": "no ai-proxy backend configured to run the grounding fallback"})
+            continue
+        try:
+            verdict, reason = await _verify_fact_llm(
+                api_key=api_key, claim_text=claim["text"], context=event_text, ws_id=ws_id,
+                correlation_id=correlation_id,
+            )
+        except aiproxy.AiProxyError:
+            log.exception("governor action grounding failed ws=%s corr=%s", ws_id, correlation_id)
+            verdict, reason = "UNKNOWN", "grounding verifier call failed"
+        if verdict == "SUPPORTED":
+            results.append({"claim": claim, "verified": True, "method": "grounded-llm", "reason": reason})
+        else:
+            results.append({"claim": claim, "verified": False, "method": None, "reason": reason})
+    return results
+
+
 def _deterministic_context(db, *, ws_id: str, thread_id: str | None) -> str:
     """Memory rows + recent thread events, plain text, for the verifier LLM and for the cheap
     substring cross-check. No LLM involved in building this — only in judging against it."""
@@ -157,19 +217,12 @@ async def _govern(*, ws_id: str, thread_id: str | None, correlation_id: str | No
         needs_verification = False
         for claim in claims:
             if claim["type"] == "action":
-                # P2: no tool.*/agent.work.* events exist yet to ground against, so every action
-                # claim today is unverified by construction. Annotate, don't hold — nothing to hold
-                # for, since no tool call could have produced a false claim yet either.
-                emit(db, "governor.claim.unverified", ws_id=ws_id, actor=("system", None),
-                     correlation_id=correlation_id,
-                     payload={"thread_id": thread_id, "persona_id": persona_id, **claim,
-                              "reason": "no tool/agent-work events to ground against (P2)"})
-                needs_verification = True
+                # Action claims are grounded synchronously in personas/router.py::run_reply,
+                # before persona.reply.ended even fires — nothing left for this post-hoc,
+                # fact-only pass to do with them.
                 continue
 
-            claim_lower = claim["text"].lower()
-            if any(claim_lower in line.lower() or line.lower() in claim_lower
-                   for line in context.splitlines() if line.strip()):
+            if any(_claim_overlaps(claim["text"], line) for line in context.splitlines() if line.strip()):
                 emit(db, "governor.claim.verified", ws_id=ws_id, actor=("system", None),
                      correlation_id=correlation_id,
                      payload={"thread_id": thread_id, "persona_id": persona_id, **claim,

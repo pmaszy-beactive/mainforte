@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     impersonation_ttl_hours: int = 8
     event_stream_maxlen: int = 20_000
 
+    # Sandboxed tool execution (P2 phase 3). sandbox_uid/gid must match Dockerfile.worker's
+    # throwaway `sandbox` user; on hosts without `runuser` (local macOS dev) sandboxed tools
+    # simply aren't runnable — they only work inside the actual worker container.
+    sandbox_uid: int = Field(10100, alias="SANDBOX_UID")
+    sandbox_gid: int = Field(10100, alias="SANDBOX_GID")
+    sandbox_work_root: str = Field("/work", alias="SANDBOX_WORK_ROOT")
+    sandbox_timeout_seconds: int = Field(60, alias="SANDBOX_TIMEOUT_SECONDS")
+
     @property
     def jwt_secret(self) -> str:
         return self.auth_secret or self.secret_key
