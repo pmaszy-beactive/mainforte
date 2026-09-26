@@ -112,8 +112,8 @@ class Event(Base):
     user_id: Mapped[str | None] = mapped_column(String(26), index=True)
     actor_type: Mapped[str] = mapped_column(String(20), nullable=False)  # user|persona|worker|system
     actor_id: Mapped[str | None] = mapped_column(String(64))
-    correlation_id: Mapped[str | None] = mapped_column(String(26))
-    causation_id: Mapped[str | None] = mapped_column(String(26))
+    correlation_id: Mapped[str | None] = mapped_column(String(64))
+    causation_id: Mapped[str | None] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     # transactional outbox: set once the event has been published to Redis and its handlers enqueued.
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

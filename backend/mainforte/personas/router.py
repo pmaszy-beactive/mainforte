@@ -307,7 +307,11 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                                                   "content": err_msg})
                         continue
                     try:
-                        result = tool.handler(**tu.input)
+                        call_input = dict(tu.input)
+                        if tu.name == "create_task":
+                            call_input.update(ws_id=ws_id, thread_id=thread_id, persona_id=persona.id,
+                                               correlation_id=correlation_id)
+                        result = tool.handler(**call_input)
                         with db_session() as db:
                             emit(db, "tool.ended", ws_id=ws_id, actor=("persona", persona.slug),
                                  correlation_id=correlation_id,
