@@ -87,13 +87,23 @@ def _glob(workspace: Path, *, pattern: str, **_: Any) -> dict[str, Any]:
     return {"matches": sorted(matches)[:500]}
 
 
+def _browser_home(workspace: Path) -> Path:
+    """Where the persistent Chromium profile state lives within a job's workspace — under
+    `home/browser/`, the subtree `tasks/work.py` stages from and syncs back to S3 (P2 phase 6),
+    rather than directly in the job root, which is thrown away with the rest of the workspace."""
+    d = workspace / "home" / "browser"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _browser_navigate(workspace: Path, *, url: str, **_: Any) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
     if not re.match(r"^https?://", url):
         raise ToolExecError("url must be http(s)")
-    state_path = workspace / "_browser_state.json"
-    last_url_path = workspace / "_browser_last_url.txt"
+    home = _browser_home(workspace)
+    state_path = home / "_browser_state.json"
+    last_url_path = home / "_browser_last_url.txt"
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         ctx = browser.new_context(storage_state=str(state_path) if state_path.exists() else None)
@@ -110,8 +120,9 @@ def _browser_navigate(workspace: Path, *, url: str, **_: Any) -> dict[str, Any]:
 def _browser_extract_text(workspace: Path, **_: Any) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
-    state_path = workspace / "_browser_state.json"
-    last_url_path = workspace / "_browser_last_url.txt"
+    home = _browser_home(workspace)
+    state_path = home / "_browser_state.json"
+    last_url_path = home / "_browser_last_url.txt"
     if not state_path.exists() or not last_url_path.exists():
         raise ToolExecError("no active browser session — call browser_navigate first")
     last_url = last_url_path.read_text().strip()

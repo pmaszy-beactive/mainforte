@@ -37,6 +37,7 @@ from mainforte.celery_app import celery
 from mainforte.config import get_settings
 from mainforte.db.session import db_session
 from mainforte.events import emit
+from mainforte.homes import sync_home, stage_home
 from mainforte.ids import new_id
 
 log = logging.getLogger(__name__)
@@ -56,15 +57,47 @@ def _job_dir(job_id: str) -> Path:
     return d
 
 
-def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Path) -> dict[str, Any]:
-    spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": str(workspace)})
+def _home_owner(ws_id: str) -> str | None:
+    """The user id whose S3 home a workspace's jobs stage/sync against. A workspace is a
+    family/household/small-team unit (`Workspace.__doc__`) with one shared browsing identity, not
+    one home per member — `owner_id` is the existing, non-nullable FK that answers this."""
+    from mainforte.db.models import Workspace
+
+    with db_session() as db:
+        ws = db.get(Workspace, ws_id)
+        return ws.owner_id if ws is not None else None
+
+
+def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Path,
+                    ws_id: str) -> dict[str, Any]:
+    """Stages the workspace's owning user's S3 home into `workspace/home/` before running the
+    tool, and syncs it back after — always, success or failure, per PLAN.md's "our own insurance"
+    framing (`finally`, not just the happy path)."""
     settings = get_settings()
+    home_dir = workspace / "home"
+    user_id = _home_owner(ws_id)
+
+    if user_id is not None:
+        stage_home(user_id, home_dir)
+        with db_session() as db:
+            emit(db, "worker.home.staged", ws_id=ws_id, actor=("system", None), correlation_id=None,
+                 payload={"user_id": user_id})
+
+    spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": str(workspace)})
     argv = [sys.executable, "-m", "mainforte.tools.sandbox_exec"]
     if _RUNUSER is not None:
         argv = [_RUNUSER, "-u", str(settings.sandbox_uid), "--", *argv]
-    proc = subprocess.run(
-        argv, input=spec, capture_output=True, text=True, timeout=settings.sandbox_timeout_seconds,
-    )
+    try:
+        proc = subprocess.run(
+            argv, input=spec, capture_output=True, text=True, timeout=settings.sandbox_timeout_seconds,
+        )
+    finally:
+        if user_id is not None:
+            sync_home(user_id, home_dir)
+            with db_session() as db:
+                emit(db, "worker.home.synced", ws_id=ws_id, actor=("system", None), correlation_id=None,
+                     payload={"user_id": user_id})
+
     if proc.returncode != 0 and not proc.stdout.strip():
         raise RuntimeError(f"sandbox_exec exited {proc.returncode}: {proc.stderr[-2000:]}")
     try:
@@ -92,7 +125,7 @@ def run_tool(self, *, tool_name: str, tool_input: dict[str, Any], ws_id: str, co
         emit(db, "agent.work.started", ws_id=ws_id, actor=("system", None), correlation_id=correlation_id,
              payload={"job_id": job_id, "tool": tool_name})
     try:
-        result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace)
+        result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id)
     except subprocess.TimeoutExpired:
         msg = f"sandboxed tool {tool_name!r} timed out after {get_settings().sandbox_timeout_seconds}s"
         with db_session() as db:
@@ -134,7 +167,7 @@ def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, c
         job_id = new_id()
         workspace = _job_dir(job_id)
         try:
-            result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace)
+            result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id)
         except Exception as e:
             outcome: dict[str, Any] = {"ok": False, "error": str(e)}
         else:
