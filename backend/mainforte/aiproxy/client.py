@@ -6,6 +6,11 @@
 
 The proxy is OpenAI- and Anthropic-compatible at `<base>/ai/v1/...`. AI_PROXY_BASE_URL may or
 may not already include the `/ai` suffix; `_ai_root()` normalizes it.
+
+Admin app/key provisioning lives at `<base>/ai/admin/apps...` (a separate standalone service from
+the dashboard's session-authenticated `/api/ai-proxy/apps...`) and is the one bearer-token,
+no-session admin API meant for machine callers like this one. See
+deploy/ai-proxy/CLIENT_API_DOCS.md, "Admin Billing API".
 """
 from __future__ import annotations
 
@@ -62,12 +67,12 @@ class MintedKey:
 def ensure_app(*, app_slug: str, name: str) -> str:
     """Idempotently ensure a proxy "app" exists for this workspace. Returns the app id."""
     with httpx.Client(base_url=_ai_root(), timeout=15) as c:
-        r = c.post("/apps", headers=_admin_headers(), json={"slug": app_slug, "name": name})
+        r = c.post("/admin/apps", headers=_admin_headers(), json={"slug": app_slug, "name": name})
         if r.status_code == 201:
             return r.json()["id"]
         if r.status_code in (400, 409):
             # already exists: look it up
-            listing = c.get("/apps", headers=_admin_headers())
+            listing = c.get("/admin/apps", headers=_admin_headers())
             listing.raise_for_status()
             for app in listing.json().get("apps", listing.json() if isinstance(listing.json(), list) else []):
                 if app.get("slug") == app_slug:
@@ -78,7 +83,7 @@ def ensure_app(*, app_slug: str, name: str) -> str:
 
 def mint_key(*, app_id: str, name: str) -> MintedKey:
     with httpx.Client(base_url=_ai_root(), timeout=15) as c:
-        r = c.post(f"/apps/{app_id}/keys", headers=_admin_headers(), json={"name": name})
+        r = c.post(f"/admin/apps/{app_id}/keys", headers=_admin_headers(), json={"name": name})
         r.raise_for_status()
         d = r.json()
         return MintedKey(key=d["key"], key_id=d["id"], prefix=d.get("prefix", d["key"][:12]))

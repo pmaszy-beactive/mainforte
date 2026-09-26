@@ -43,9 +43,18 @@ VERIFY_SYSTEM = (
 )
 
 
+def _strip_json_fence(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return text.strip()
+
+
 def _parse_claims(raw: str) -> list[dict[str, str]]:
     try:
-        data = json.loads(raw)
+        data = json.loads(_strip_json_fence(raw))
     except json.JSONDecodeError:
         return []
     if not isinstance(data, list):
@@ -87,7 +96,7 @@ async def _verify_fact_llm(*, api_key: str, claim_text: str, context: str, ws_id
     )
     _record_usage(ws_id=ws_id, correlation_id=correlation_id, purpose="governor.verify", usage=usage)
     try:
-        d = json.loads(raw)
+        d = json.loads(_strip_json_fence(raw))
     except json.JSONDecodeError:
         return "UNKNOWN", "verifier returned unparseable output"
     verdict = d.get("verdict") if d.get("verdict") in ("SUPPORTED", "CONTRADICTED", "UNKNOWN") else "UNKNOWN"
