@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +24,17 @@ from typing import Any
 
 class ToolExecError(RuntimeError):
     pass
+
+
+# Defense in depth: even though the caller (v1_runuser.py) now launches this whole process with a
+# scrubbed env, `_bash` runs arbitrary LLM-directed shell commands — it must never rely on the
+# caller having done that, since an inherited full env (worker secrets: DB url, API keys, JWT
+# signing secrets) would otherwise be trivially readable via `env`/`printenv` from inside the job.
+_BASH_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL")
+
+
+def _minimal_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k in _BASH_ENV_ALLOWLIST}
 
 
 def _resolve(workspace: Path, rel: str) -> Path:
@@ -38,6 +50,7 @@ def _resolve(workspace: Path, rel: str) -> Path:
 def _bash(workspace: Path, *, command: str, **_: Any) -> dict[str, Any]:
     proc = subprocess.run(
         ["/bin/sh", "-c", command], cwd=workspace, capture_output=True, text=True, timeout=30,
+        env=_minimal_env(),
     )
     return {"exit_code": proc.returncode, "stdout": proc.stdout[-20_000:], "stderr": proc.stderr[-4_000:]}
 

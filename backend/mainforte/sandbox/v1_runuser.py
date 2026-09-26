@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,15 @@ if _RUNUSER is None:
         "This is expected on local macOS dev; it must never be true inside Dockerfile.worker."
     )
 
+# `runuser` drops the uid but does not sanitize the environment, so the sandboxed process would
+# otherwise inherit every secret in the worker's own env (DB url, API keys, JWT signing secrets —
+# see config.py's Settings). Pass an explicit minimal env instead of the parent's full environment.
+_SANDBOX_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL")
+
+
+def _minimal_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k in _SANDBOX_ENV_ALLOWLIST}
+
 
 class RunuserSandbox:
     def run(self, *, tool_name: str, tool_input: dict[str, Any], workspace: Path, ws_id: str,
@@ -32,7 +42,10 @@ class RunuserSandbox:
         argv = [sys.executable, "-m", "mainforte.tools.sandbox_exec"]
         if _RUNUSER is not None:
             argv = [_RUNUSER, "-u", str(settings.sandbox_uid), "--", *argv]
-        proc = subprocess.run(argv, input=spec, capture_output=True, text=True, timeout=timeout_seconds)
+        proc = subprocess.run(
+            argv, input=spec, capture_output=True, text=True, timeout=timeout_seconds,
+            env=_minimal_env(),
+        )
 
         if proc.returncode != 0 and not proc.stdout.strip():
             raise RuntimeError(f"sandbox_exec exited {proc.returncode}: {proc.stderr[-2000:]}")
