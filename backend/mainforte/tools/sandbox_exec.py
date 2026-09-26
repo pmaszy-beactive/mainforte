@@ -30,7 +30,9 @@ class ToolExecError(RuntimeError):
 # scrubbed env, `_bash` runs arbitrary LLM-directed shell commands — it must never rely on the
 # caller having done that, since an inherited full env (worker secrets: DB url, API keys, JWT
 # signing secrets) would otherwise be trivially readable via `env`/`printenv` from inside the job.
-_BASH_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL")
+# GEMINI_API_KEY/GEMINI_BASE_URL are allowlisted too, deliberately and narrowly: `_web_search`
+# needs them, and nothing else in this process should ever see any other secret.
+_BASH_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "GEMINI_API_KEY", "GEMINI_BASE_URL")
 
 
 def _minimal_env() -> dict[str, str]:
@@ -130,6 +132,59 @@ def _browser_navigate(workspace: Path, *, url: str, **_: Any) -> dict[str, Any]:
     return {"title": title, "url": final_url}
 
 
+def _resolve_gemini_config() -> tuple[str, dict[str, str], str]:
+    """Returns (url, headers, auth_mode) for a Gemini generateContent call. Mirrors
+    beactive-claw's resolveGeminiConfig/buildGeminiGenerateContentRequest: when GEMINI_BASE_URL is
+    set, use it with Bearer auth (the backbone AI-proxy path); otherwise fall back to the public
+    Gemini endpoint with the key as a query param — the path that applies here, since mainforte
+    isn't behind that proxy."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ToolExecError("GEMINI_API_KEY not configured")
+    base_url = os.environ.get("GEMINI_BASE_URL")
+    model = "gemini-2.5-flash"
+    if base_url:
+        base_url = base_url.rstrip("/")
+        for suffix in ("/v1beta", "/v1"):
+            if base_url.endswith(suffix):
+                base_url = base_url[: -len(suffix)]
+        url = f"{base_url}/v1beta/models/{model}:generateContent"
+        return url, {"Authorization": f"Bearer {api_key}"}, "bearer"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    return url, {}, "query"
+
+
+def _web_search(workspace: Path, *, query: str, **_: Any) -> dict[str, Any]:
+    """Grounded search via Gemini's native google_search tool: one HTTP POST, response carries a
+    synthesized answer plus groundingMetadata citations (source URLs/snippets)."""
+    import httpx
+
+    url, headers, _auth_mode = _resolve_gemini_config()
+    body = {"contents": [{"parts": [{"text": query}]}], "tools": [{"google_search": {}}]}
+    try:
+        resp = httpx.post(url, json=body, headers=headers, timeout=30)
+    except httpx.HTTPError as e:
+        raise ToolExecError(f"web_search request failed: {e}") from None
+    if resp.status_code in (401, 403):
+        raise ToolExecError(f"web_search auth rejected by Gemini ({resp.status_code}): {resp.text[:500]}")
+    if resp.status_code != 200:
+        raise ToolExecError(f"web_search failed ({resp.status_code}): {resp.text[:500]}")
+    data = resp.json()
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return {"answer": "", "citations": []}
+    candidate = candidates[0]
+    parts = (candidate.get("content") or {}).get("parts") or []
+    answer = "".join(p.get("text", "") for p in parts)
+    grounding = candidate.get("groundingMetadata") or {}
+    citations = [
+        {"title": (chunk.get("web") or {}).get("title"), "url": (chunk.get("web") or {}).get("uri")}
+        for chunk in grounding.get("groundingChunks", [])
+        if chunk.get("web")
+    ]
+    return {"answer": answer, "citations": citations}
+
+
 def _browser_extract_text(workspace: Path, **_: Any) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
@@ -161,6 +216,7 @@ HANDLERS = {
     "glob": _glob,
     "browser_navigate": _browser_navigate,
     "browser_extract_text": _browser_extract_text,
+    "web_search": _web_search,
 }
 
 

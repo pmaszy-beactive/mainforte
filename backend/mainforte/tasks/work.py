@@ -133,10 +133,15 @@ def run_tool(self, *, tool_name: str, tool_input: dict[str, Any], ws_id: str, co
 
 
 def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, correlation_id: str,
-                     thread_id: str | None, persona_id: str | None) -> dict[str, Any]:
+                     thread_id: str | None, persona_id: str | None, task_id: str) -> dict[str, Any]:
     """Runs one stage's tool call, sandboxed-or-not exactly like the chat router does, but
     in-process on the `work` queue (this function only ever runs from inside `run_task_stage`,
-    itself already a `work`-queue task — no further dispatch/poll indirection needed)."""
+    itself already a `work`-queue task — no further dispatch/poll indirection needed).
+
+    In-process (non-sandboxed) handlers also receive the executing run's own `task_id` — a stage's
+    literal `input` dict is cloned verbatim on every recurring firing (see `fire_scheduled_task`),
+    so it can never itself name the run's id; a tool that needs to know "which run am I" (e.g. to
+    look up its own template's prior runs) must accept it as an injected kwarg instead."""
     from mainforte.tools.catalog import TOOLS
 
     tool = TOOLS.get(tool_name)
@@ -158,7 +163,7 @@ def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, c
             shutil.rmtree(workspace, ignore_errors=True)
     else:
         try:
-            outcome = {"ok": True, "result": tool.handler(**tool_input)}
+            outcome = {"ok": True, "result": tool.handler(**tool_input, task_id=task_id)}
         except Exception as e:
             outcome = {"ok": False, "error": str(e)}
     with db_session() as db:
@@ -262,7 +267,7 @@ def run_task_stage(self, *, task_id: str, ws_id: str) -> None:
 
     outcome = _run_stage_tool(
         tool_name=stage["tool"], tool_input=stage.get("input", {}), ws_id=ws_id,
-        correlation_id=stage_corr, thread_id=thread_id, persona_id=persona_id,
+        correlation_id=stage_corr, thread_id=thread_id, persona_id=persona_id, task_id=task_id,
     )
 
     if not outcome["ok"] and not stage.get("continue_on_error"):

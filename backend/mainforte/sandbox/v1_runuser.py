@@ -27,7 +27,9 @@ if _RUNUSER is None:
 # `runuser` drops the uid but does not sanitize the environment, so the sandboxed process would
 # otherwise inherit every secret in the worker's own env (DB url, API keys, JWT signing secrets —
 # see config.py's Settings). Pass an explicit minimal env instead of the parent's full environment.
-_SANDBOX_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL")
+# GEMINI_API_KEY/GEMINI_BASE_URL are allowlisted too, deliberately and narrowly, for the
+# `web_search` tool — nothing else in the sandboxed process should ever see any other secret.
+_SANDBOX_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "GEMINI_API_KEY", "GEMINI_BASE_URL")
 
 
 def _minimal_env() -> dict[str, str]:

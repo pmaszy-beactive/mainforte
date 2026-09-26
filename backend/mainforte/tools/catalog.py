@@ -145,6 +145,23 @@ _register(Tool(
     sandboxed=True,
 ))
 
+_register(Tool(
+    name="web_search",
+    description=(
+        "Grounded web search (Gemini's native google_search tool): returns a synthesized answer "
+        "plus source citations. Use this for anything that needs current, real-world information — "
+        "prefer it over guessing, and follow up promising citations with browser_navigate/"
+        "browser_extract_text when you need more than the snippet gives you."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "Search query"}},
+        "required": ["query"],
+    },
+    handler=_not_implemented,
+    sandboxed=True,
+))
+
 
 def _now(**_kwargs: Any) -> dict[str, str]:
     return {"utc": datetime.now(UTC).isoformat()}
@@ -161,7 +178,8 @@ _register(Tool(
 
 def _create_task(*, ws_id: str, title: str, plan: list[dict[str, Any]],
                   thread_id: str | None = None, persona_id: str | None = None,
-                  correlation_id: str | None = None, schedule: dict[str, Any] | None = None) -> dict[str, Any]:
+                  correlation_id: str | None = None, schedule: dict[str, Any] | None = None,
+                  **_kwargs: Any) -> dict[str, Any]:
     """In-process handler for the `create_task` tool: creates a `Task` row in `planned` status
     and requests human approval. Deliberately does NOT auto-approve — every task, however it was
     proposed, waits for a `POST .../approve` before `run_task_stage` ever runs (see Phase 5 of
@@ -249,7 +267,7 @@ _register(Tool(
 
 def _create_widget(*, ws_id: str, owner_id: str, title: str, slug: str, html: str,
                     data: dict[str, Any] | None = None, refresh_spec: dict[str, Any] | None = None,
-                    correlation_id: str | None = None) -> dict[str, Any]:
+                    correlation_id: str | None = None, **_kwargs: Any) -> dict[str, Any]:
     """In-process handler for the `create_widget` tool: writes the bundle to storage and creates
     the Widget row. No sandbox needed — this only touches Storage/DB, never runs the persona's
     HTML (see PLAN.md P2 phase 7)."""
@@ -296,5 +314,136 @@ _register(Tool(
         "required": ["title", "slug", "html"],
     },
     handler=_create_widget,
+    sandboxed=False,
+))
+
+
+def _car_search_template_id(db: Any, task_id: str) -> str:
+    """A run row's own template id if it's a recurring clone (`result.schedule_template_id`,
+    set by `fire_scheduled_task`), else the run's own id — covering the template's first,
+    pre-recurrence run, where there is no prior clone to point back to yet."""
+    from mainforte.db.models import Task
+
+    task = db.get(Task, task_id)
+    if task is not None and task.result and task.result.get("schedule_template_id"):
+        return task.result["schedule_template_id"]
+    return task_id
+
+
+def _car_search_state_get(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
+    """In-process handler for `car_search_state` (verb=get): accumulates `seen_urls`/`shortlist`
+    from every prior run of this task's template, oldest first. Narrowly scoped to the car-search
+    proof case — not a general state-store tool (see PLAN.md's car-search plan, Part 3): reuses
+    `Task.result` JSONB exactly like `fire_scheduled_task` already does for `schedule_template_id`,
+    rather than adding a new table."""
+    from mainforte.db.models import Task
+    from mainforte.db.session import db_session
+
+    with db_session() as db:
+        template_id = _car_search_template_id(db, task_id)
+        rows = (
+            db.query(Task.result)
+            .filter(
+                (Task.result["schedule_template_id"].astext == template_id)
+                | (Task.id == template_id)
+            )
+            .order_by(Task.created_at.asc())
+            .all()
+        )
+        seen_urls: list[str] = []
+        shortlist: list[dict[str, Any]] = []
+        for (result,) in rows:
+            if not result:
+                continue
+            for url in result.get("seen_urls", []):
+                if url not in seen_urls:
+                    seen_urls.append(url)
+            shortlist.extend(result.get("shortlist", []))
+    return {"template_id": template_id, "seen_urls": seen_urls, "shortlist": shortlist}
+
+
+def _car_search_state_put(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
+    """In-process handler for `car_search_state` (verb=put): finds this run's own `web_search`
+    stage result, excludes any listing URL already surfaced by an earlier run of this same
+    template, and writes the genuinely-new URLs/shortlist into this run's own `Task.result` —
+    without disturbing the `schedule_template_id` key `fire_scheduled_task` already wrote there.
+
+    A stage's `input` is authored once, statically, at `create_task` time (`fire_scheduled_task`
+    clones `plan` verbatim on every firing — see `_run_stage_tool`'s docstring), so this can't
+    receive the prior `web_search` stage's own result as a literal argument the way a normal
+    function call would. Instead it finds that stage's own `tool.ended` event — emitted by
+    `_run_stage_tool` under the deterministic `f"{task.correlation_id}:{stage_index}"` correlation
+    id — by scanning this task's own `plan` for the (single, expected) `web_search` stage, and pulls
+    the citations straight out of that event's payload."""
+    from mainforte.db.models import Event, Task
+    from mainforte.db.session import db_session
+
+    with db_session() as db:
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"no such task: {task_id}")
+        prior = _car_search_state_get(task_id=task_id)
+        already_seen = set(prior["seen_urls"])
+
+        base_corr = task.correlation_id or task_id
+        new_urls: list[str] = []
+        shortlist: list[dict[str, Any]] = []
+        for stage_index, stage in enumerate(task.plan or []):
+            if stage.get("type") == "tool" and stage.get("tool") == "web_search":
+                stage_corr = f"{base_corr}:{stage_index}"
+                event = (
+                    db.query(Event)
+                    .filter(Event.type == "tool.ended", Event.correlation_id == stage_corr)
+                    .order_by(Event.id.desc())
+                    .first()
+                )
+                if event is not None:
+                    search_result = event.payload.get("result") or {}
+                    for citation in search_result.get("citations", []):
+                        url = citation.get("url")
+                        if url and url not in already_seen and url not in new_urls:
+                            new_urls.append(url)
+                            shortlist.append(citation)
+        result = dict(task.result or {})
+        result["seen_urls"] = new_urls
+        result["shortlist"] = shortlist
+        task.result = result
+    return {"ok": True, "stored_urls": len(new_urls), "stored_shortlist": len(shortlist)}
+
+
+def _car_search_state(*, verb: str, task_id: str, **_kwargs: Any) -> dict[str, Any]:
+    if verb == "get":
+        return _car_search_state_get(task_id=task_id)
+    if verb == "put":
+        return _car_search_state_put(task_id=task_id)
+    raise ValueError(f"unknown verb {verb!r}, expected 'get' or 'put'")
+
+
+_register(Tool(
+    name="car_search_state",
+    description=(
+        "Read or write this recurring car-search task's cross-run memory: which listing URLs have "
+        "already been surfaced to the user, and the accumulated shortlist. Call with verb='get' at "
+        "the start of a run to load what prior runs already showed (empty on the first run); call "
+        "with verb='put' at the end of a run to record newly-seen URLs and the updated shortlist so "
+        "the next weekly run doesn't repeat them. Scoped to this one task's own recurrence — not a "
+        "general-purpose state store."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "verb": {"type": "string", "enum": ["get", "put"]},
+            "new_urls": {
+                "type": "array", "items": {"type": "string"},
+                "description": "put only: all listing URLs seen this run (merged with prior runs' on the next get)",
+            },
+            "shortlist": {
+                "type": "array", "items": {"type": "object"},
+                "description": "put only: this run's shortlist entries to append to the accumulated list",
+            },
+        },
+        "required": ["verb"],
+    },
+    handler=_car_search_state,
     sandboxed=False,
 ))

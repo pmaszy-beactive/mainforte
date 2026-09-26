@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("mainforte")
 settings = get_settings()
 
-app = FastAPI(title="Mainforte", version="0.1.6", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="Mainforte", version="0.1.7", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 

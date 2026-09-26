@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     ai_proxy_base_url: str | None = Field(None, alias="AI_PROXY_BASE_URL")
     ai_proxy_admin_secret: str | None = Field(None, alias="AI_PROXY_ADMIN_SECRET")
 
+    # Gemini's native `google_search` grounding tool backs the `web_search` sandboxed tool. When
+    # GEMINI_BASE_URL is unset we fall back to the public generativelanguage.googleapis.com endpoint
+    # with the key as a query param — mainforte isn't behind the backbone AI proxy.
+    gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
+    gemini_base_url: str | None = Field(None, alias="GEMINI_BASE_URL")
+
     meeting_bot_base_url: str | None = Field(None, alias="MEETING_BOT_BASE_URL")
     meeting_bot_api_key: str | None = Field(None, alias="MEETING_BOT_API_KEY")
 
