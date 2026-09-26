@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { EventSocket, type SocketStatus } from "@/lib/ws";
 import { api } from "@/lib/api";
-import type { Attachment, ChatMessagePayload, ReplyPayload, WsEvent } from "@/lib/types";
+import type { Attachment, ChatMessagePayload, ReplyPayload, TaskBlockedPayload, WsEvent } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
 import { useStream } from "@/stores/stream";
 import { useOutbox, type OutboxStatus } from "@/stores/outbox";
@@ -24,16 +24,29 @@ export interface Bubble {
   local?: { status: OutboxStatus; attempts: number; error: string | null };
 }
 
+export interface BlockedTask {
+  taskId: string;
+  threadId: string | null;
+  reason: string;
+  ts: string;
+}
+
 interface State {
   bubbles: Bubble[];
   activity: WsEvent[];
   seen: Record<string, 1>;
+  /** Tasks currently awaiting human input, keyed by task_id. Cleared once resolved/terminal. */
+  blockedTasks: Record<string, BlockedTask>;
 }
 
-type Action = { type: "event"; ev: WsEvent } | { type: "hydrate"; events: WsEvent[] } | { type: "reset" };
+type Action =
+  | { type: "event"; ev: WsEvent }
+  | { type: "hydrate"; events: WsEvent[] }
+  | { type: "reset" }
+  | { type: "clearBlocked"; taskId: string };
 
 const MAX_ACTIVITY = 200;
-const initial: State = { bubbles: [], activity: [], seen: {} };
+const initial: State = { bubbles: [], activity: [], seen: {}, blockedTasks: {} };
 
 function streamKey(ev: WsEvent) {
   const p = ev.payload as unknown as ReplyPayload;
@@ -106,6 +119,20 @@ function applyEvent(state: State, ev: WsEvent): State {
       bubbles[idx] = next;
       return { ...state, seen, activity, bubbles };
     }
+    case "task.blocked": {
+      const p = ev.payload as unknown as TaskBlockedPayload;
+      const blockedTasks = { ...state.blockedTasks, [p.task_id]: { taskId: p.task_id, threadId: p.thread_id ?? null, reason: p.reason, ts: ev.ts } };
+      return { ...state, seen, blockedTasks, activity: pushActivity(state.activity, ev) };
+    }
+    case "task.completed":
+    case "task.failed":
+    case "task.canceled": {
+      const taskId = (ev.payload as { task_id?: string }).task_id;
+      if (!taskId || !(taskId in state.blockedTasks)) return { ...state, seen, activity: pushActivity(state.activity, ev) };
+      const blockedTasks = { ...state.blockedTasks };
+      delete blockedTasks[taskId];
+      return { ...state, seen, blockedTasks, activity: pushActivity(state.activity, ev) };
+    }
     default:
       return { ...state, seen, activity: pushActivity(state.activity, ev) };
   }
@@ -125,6 +152,12 @@ function reduce(state: State, action: Action): State {
       return action.events.reduce(applyEvent, state);
     case "event":
       return applyEvent(state, action.ev);
+    case "clearBlocked": {
+      if (!(action.taskId in state.blockedTasks)) return state;
+      const blockedTasks = { ...state.blockedTasks };
+      delete blockedTasks[action.taskId];
+      return { ...state, blockedTasks };
+    }
   }
 }
 
@@ -197,5 +230,14 @@ export function useEventStream(workspaceId: string | null | undefined) {
     };
   }, [token, workspaceId]);
 
-  return useMemo(() => ({ bubbles: state.bubbles, activity: state.activity, connection: conn }), [state, conn]);
+  return useMemo(
+    () => ({
+      bubbles: state.bubbles,
+      activity: state.activity,
+      connection: conn,
+      blockedTasks: state.blockedTasks,
+      clearBlocked: (taskId: string) => dispatch({ type: "clearBlocked", taskId }),
+    }),
+    [state, conn],
+  );
 }

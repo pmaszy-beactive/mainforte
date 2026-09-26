@@ -225,7 +225,9 @@
     "uploadRetry": "Réessayer le téléversement",
     "tooLarge": "Trop volumineux (max 25 Mo)",
     "attachmentLost": "Pièce jointe perdue après le rechargement",
-    "closeLightbox": "Fermer"
+    "closeLightbox": "Fermer",
+    "taskBlockedPlaceholder": "Tapez votre réponse…",
+    "taskBlockedSubmit": "Envoyer"
   },
   "settings": {
     "title": "Réglages",

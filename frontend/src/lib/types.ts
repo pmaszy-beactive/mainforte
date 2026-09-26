@@ -82,6 +82,25 @@ export interface ReplyPayload {
   text: string;
 }
 
+export type TaskStatus = "planned" | "approved" | "running" | "blocked" | "qa" | "completed" | "failed" | "canceled";
+
+export interface TaskBlockedPayload {
+  task_id: string;
+  stage_index: number;
+  thread_id: string | null;
+  reason: string;
+}
+
+export interface Task {
+  id: string;
+  status: TaskStatus;
+  plan: unknown[];
+  current_stage: number;
+  thread_id: string | null;
+  persona_id: string | null;
+  result: unknown;
+}
+
 /* Admin */
 export interface AdminUser {
   id: string;

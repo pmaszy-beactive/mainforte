@@ -8,6 +8,7 @@ import type {
   AuthResponse,
   ChatPostResponse,
   Me,
+  Task,
   Workspace,
   WsEvent,
 } from "./types";
@@ -122,6 +123,16 @@ export const api = {
     cancelReply: (id: string, b: { thread_id?: string | null; correlation_id?: string | null }) =>
       post<void>(`/api/workspaces/${encodeURIComponent(id)}/chat/cancel`, b),
     uploadUrl: (id: string) => `${API_URL}/api/workspaces/${encodeURIComponent(id)}/uploads`,
+  },
+  tasks: {
+    get: (wsId: string, taskId: string) =>
+      get<Task>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}`),
+    approve: (wsId: string, taskId: string) =>
+      post<{ event_id: string; status: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}/approve`),
+    reject: (wsId: string, taskId: string) =>
+      post<{ event_id: string; status: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}/reject`),
+    input: (wsId: string, taskId: string, text: string) =>
+      post<{ event_id: string; status: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}/input`, { text }),
   },
   admin: {
     users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),

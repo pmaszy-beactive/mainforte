@@ -16,6 +16,7 @@ import { Composer } from "./Composer";
 import { ActivityStrip } from "./ActivityStrip";
 import { ViewPane } from "./ViewPane";
 import { Lightbox } from "./Lightbox";
+import { TaskBlockedBanner } from "./TaskBlockedBanner";
 
 export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
   const { t } = useTranslation();
@@ -51,6 +52,10 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
 
   const visible = useMemo(() => bubbles.filter((b) => (threadId === null ? true : b.threadId === threadId)), [bubbles, threadId]);
   const streaming = useMemo(() => visible.filter((b) => b.streaming), [visible]);
+  const blockedHere = useMemo(
+    () => Object.values(stream.blockedTasks).filter((bt) => (threadId === null ? bt.threadId === null : bt.threadId === threadId)),
+    [stream.blockedTasks, threadId],
+  );
 
   const cancel = useMutation({
     mutationFn: async () => {
@@ -89,6 +94,10 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
         <div className={cn("flex min-w-0 flex-1 flex-col", viewPaneOpen && "lg:max-w-[55%]")}>
           <MessageList bubbles={visible} empty={workspaceId ? t("chat.empty") : t("chat.noWorkspace")} />
           <div className="border-t border-white/5 bg-ink-950/40 px-4 pb-4 pt-3 backdrop-blur-md">
+            {workspaceId &&
+              blockedHere.map((bt) => (
+                <TaskBlockedBanner key={bt.taskId} workspaceId={workspaceId} task={bt} onResolved={() => stream.clearBlocked(bt.taskId)} />
+              ))}
             <Composer
               workspaceId={workspaceId}
               draftKey={`${workspaceId ?? "-"}:${threadId ?? "global"}`}

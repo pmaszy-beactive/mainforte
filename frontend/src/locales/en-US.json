@@ -225,7 +225,9 @@
     "uploadRetry": "Retry upload",
     "tooLarge": "Too large (max 25 MB)",
     "attachmentLost": "Attachment lost after reload",
-    "closeLightbox": "Close"
+    "closeLightbox": "Close",
+    "taskBlockedPlaceholder": "Type your response…",
+    "taskBlockedSubmit": "Submit"
   },
   "settings": {
     "title": "Settings",
