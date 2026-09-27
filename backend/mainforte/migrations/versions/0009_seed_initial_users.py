@@ -21,7 +21,13 @@ _SEED_EMAILS = ["paul@beactive.ai", "alice@beactive.ai", "daniel@beactive.ai", "
 
 
 def upgrade() -> None:
-    from mainforte.auth.service import create_user
+    # Insert rows directly rather than calling auth.service.create_user(): that helper emits
+    # events (user.created, workspace.created) via the outbox, whose after_commit hook opens its
+    # own connection to mark them dispatched -- but migrations run inside alembic's single
+    # outer transaction, so that second connection can't yet see tables this same run just
+    # created. A migration must never trigger the event bus.
+    from mainforte.auth.service import role_for
+    from mainforte.db.models import Membership, User, Workspace
 
     db = Session(bind=op.get_bind())
     try:
@@ -30,7 +36,14 @@ def upgrade() -> None:
             existing = db.execute(text("select 1 from users where email = :email"), {"email": email}).first()
             if existing:
                 continue
-            create_user(db, email=email, password=None)
+            name = email.split("@")[0]
+            user = User(email=email, name=name, role=role_for(email), password_hash=None)
+            db.add(user)
+            db.flush()
+            ws = Workspace(name=f"{name}'s home", owner_id=user.id)
+            db.add(ws)
+            db.flush()
+            db.add(Membership(workspace_id=ws.id, user_id=user.id, role="owner"))
         db.commit()
     finally:
         db.close()

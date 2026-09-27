@@ -54,8 +54,22 @@ class Settings(BaseSettings):
     meeting_bot_base_url: str | None = Field(None, alias="MEETING_BOT_BASE_URL")
     meeting_bot_api_key: str | None = Field(None, alias="MEETING_BOT_API_KEY")
 
+    # Worker-pool reconciler (PLAN.md §1.8): api-server -> SSH through backbone's bastion
+    # (jump host) -> Jenkins CLI `build <job> -p K=V` -> Jenkins job runs deploy-worker.sh on
+    # a node. Mirrors backbone's own jenkins_manager.py / ActiveClaw's lib/jenkins.ts pattern.
+    # Bastion and Jenkins keys are read from files (never inline in env), matching how the
+    # rest of this codebase references secrets that are file material, not short strings.
     jenkins_host: str | None = Field(None, alias="JENKINS_HOST")
     jenkins_port: int | None = Field(None, alias="JENKINS_PORT")
+    jenkins_username: str | None = Field(None, alias="JENKINS_USERNAME")
+    jenkins_ssh_key_path: str | None = Field(None, alias="JENKINS_SSH_KEY_PATH")
+    jenkins_provision_job: str | None = Field(None, alias="JENKINS_PROVISION_JOB")
+    jenkins_destroy_job: str | None = Field(None, alias="JENKINS_DESTROY_JOB")
+
+    bastion_host: str | None = Field(None, alias="BASTION_HOST")
+    bastion_port: int = Field(22, alias="BASTION_PORT")
+    bastion_username: str | None = Field(None, alias="BASTION_USERNAME")
+    bastion_ssh_key_path: str | None = Field(None, alias="BASTION_SSH_KEY_PATH")
 
     session_ttl_days: int = 30
     impersonation_ttl_hours: int = 8
