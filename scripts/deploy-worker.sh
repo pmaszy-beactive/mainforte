@@ -130,6 +130,29 @@ if [ -n "$RESOLVED_BROKER_URL" ]; then
     ENV_ARGS+=(-e "CELERY_BROKER_URL=$RESOLVED_BROKER_URL")
 fi
 
+# rediss:// and amqps:// both terminate at backbone's internal CA, which is
+# self-signed — the host trusts it (deploy-v1.sh maintains a merged CA bundle
+# there), but a fresh container has no idea it exists. Redis's ssl_ca_certs
+# query param points at an in-container path; py-amqp/Celery has no such URL
+# param and instead relies on Python's default SSL context, so give it the
+# same trust via SSL_CERT_FILE/REQUESTS_CA_BUNDLE — exactly what deploy-v1.sh
+# does for every other backbone-hosted container (see its _CA_CERT_VOL /
+# _TRUST_BUNDLE_ENV, ~line 6271). Without this mount, amqps:// connections
+# fail with "self-signed certificate in certificate chain".
+VOL_ARGS=()
+_INTERNAL_CA_DIR="${INTERNAL_TLS_DIR:-/etc/backbone/internal-tls}"
+_INTERNAL_CA_FILE="${_INTERNAL_CA_DIR}/ca.crt"
+_MERGED_CA_FILE="${_INTERNAL_CA_DIR}/merged-ca-bundle.crt"
+if [ -f "$_INTERNAL_CA_FILE" ]; then
+    VOL_ARGS+=(-v "${_INTERNAL_CA_FILE}:/etc/ssl/backbone-ca/ca.crt:ro")
+    if [ -f "$_MERGED_CA_FILE" ]; then
+        VOL_ARGS+=(-v "${_MERGED_CA_FILE}:/etc/ssl/backbone-ca/merged-bundle.crt:ro")
+        ENV_ARGS+=(-e "SSL_CERT_FILE=/etc/ssl/backbone-ca/merged-bundle.crt" -e "REQUESTS_CA_BUNDLE=/etc/ssl/backbone-ca/merged-bundle.crt")
+    fi
+else
+    echo "  WARNING: internal CA not found at $_INTERNAL_CA_FILE — amqps:///rediss:// TLS verification will fail"
+fi
+
 echo "  Starting..."
 # `docker compose images -q worker` only reports images for containers Compose has
 # created (i.e. after `up`/`run`), so it's empty here since we only ever `build`.
@@ -139,6 +162,7 @@ docker run -d \
     --name "$WORKER_NAME" \
     --restart unless-stopped \
     "${ENV_ARGS[@]}" \
+    "${VOL_ARGS[@]}" \
     mainforte-worker
 
 echo "  Started. Liveness: AgentWorker.last_heartbeat where container_name=$WORKER_NAME"
