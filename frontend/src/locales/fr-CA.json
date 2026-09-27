@@ -286,6 +286,7 @@
       "finances": "Finances",
       "errors": "Erreurs API",
       "jobs": "Tâches",
+      "tasks": "Exécutions",
       "workers": "Travailleurs",
       "events": "Événements"
     },
@@ -329,6 +330,20 @@
       "running": "En cours",
       "noQueues": "Aucune file signalée.",
       "empty": "Rien en cours."
+    },
+    "tasks": {
+      "status": "État",
+      "workspace": "Espace de travail",
+      "persona": "Persona",
+      "stage": "Étape",
+      "attempt": "Tentative",
+      "created": "Créée",
+      "filterStatus": "Filtrer par état…",
+      "filterWorkspace": "ID d'espace de travail…",
+      "empty": "Aucune exécution.",
+      "events": "Chronologie des événements",
+      "plan": "Plan",
+      "result": "Résultat"
     },
     "workers": {
       "status": "État",

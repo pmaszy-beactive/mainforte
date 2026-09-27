@@ -151,6 +151,27 @@ export interface AdminWorkers {
   desired: number;
   workers: { id: string; status: string; node: string; last_heartbeat: string; current_job: string | null }[];
 }
+export interface AdminTaskSummary {
+  id: string;
+  ws_id: string;
+  ws_name: string | null;
+  persona_id: string | null;
+  persona_name: string | null;
+  status: string;
+  current_stage: number;
+  plan_len: number;
+  attempt: number;
+  schedule: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface AdminTasks {
+  tasks: AdminTaskSummary[];
+}
+export interface AdminTaskDetail {
+  task: AdminTaskSummary & { plan: unknown[]; result: unknown; correlation_id: string | null; thread_id: string | null };
+  events: WsEvent[];
+}
 
 /* Billing */
 export interface BillingPrice {
