@@ -48,15 +48,23 @@ def get_task(workspace_id: str, task_id: str, ident: Identity = Depends(current_
 @router.post("/{task_id}/approve", status_code=202)
 def approve_task(workspace_id: str, task_id: str, ident: Identity = Depends(current_identity),
                   db: Session = Depends(get_db)):
+    """A task created with a `schedule` up front (`create_task`'s optional field, or a prior
+    `POST .../schedule` call before approval) is a recurring template: approving it must hand
+    control to `refresh_due_tasks`/`fire_scheduled_task` (status="scheduled"), never run the
+    template row itself via `run_task_stage` -- the template is a clone source, not a run, and
+    `fire_scheduled_task` already creates its own fresh `status="approved"` run row per occurrence.
+    A plain one-shot task (no schedule) keeps the original approve-and-run-once behavior."""
     ws = require_membership(workspace_id, ident, db)
     task = _get_task(workspace_id, task_id, db)
     if task.status != "planned":
         raise HTTPException(status.HTTP_409_CONFLICT, f"task is {task.status}, not planned")
-    task.status = "approved"
+    recurring = bool((task.schedule or {}).get("active"))
+    task.status = "scheduled" if recurring else "approved"
     ev = emit(db, "task.approved", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
               correlation_id=task.correlation_id, payload={"task_id": task_id, "thread_id": task.thread_id})
     db.commit()
-    run_task_stage.delay(task_id=task_id, ws_id=ws.id)
+    if not recurring:
+        run_task_stage.delay(task_id=task_id, ws_id=ws.id)
     return {"event_id": ev["id"], "status": task.status}
 
 

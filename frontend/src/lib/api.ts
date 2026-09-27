@@ -108,6 +108,7 @@ export const api = {
     resetPassword: (b: { token: string; password: string }) => post<void>("/api/auth/reset-password", b),
     logout: () => post<void>("/api/auth/logout"),
     googleStartUrl: () => `${API_URL}/api/auth/google/start`,
+    connectGmailUrl: () => authedUrl(`${API_URL}/api/auth/google/connect-gmail`),
     impersonate: (userId: string) => post<{ token: string }>(`/api/auth/impersonate/${encodeURIComponent(userId)}`),
     stopImpersonate: () => post<{ token: string }>("/api/auth/impersonate/stop"),
   },

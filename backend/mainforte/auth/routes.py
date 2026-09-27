@@ -14,6 +14,7 @@ from mainforte.auth.jwt import mint_session
 from mainforte.auth.passwords import hash_password, verify_password
 from mainforte.auth.service import consume_token, create_user, issue_token, public_user
 from mainforte.config import get_settings
+from mainforte.crypto import encrypt
 from mainforte.db.base import utcnow
 from mainforte.db.models import Membership, OAuthIdentity, User, Workspace
 from mainforte.db.session import get_db
@@ -158,6 +159,40 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     user.email_verified_at = user.email_verified_at or utcnow()
     out = _session_response(db, user, method="google")
     return RedirectResponse(f"{get_settings().frontend_url}/oauth/callback#token={out['token']}&next={nxt}")
+
+
+_GMAIL_SCOPE = google.BASE_SCOPES + " https://www.googleapis.com/auth/gmail.send"
+
+
+@router.get("/google/connect-gmail")
+def google_connect_gmail(identity: Identity = Depends(current_identity)):
+    """Incremental consent: an already-logged-in user escalates their existing Google identity to
+    also grant gmail.send, kept as a separate flow from /google/start because it has a different
+    precondition (an existing session, not none) and a different post-action (persist tokens and
+    return to settings, not mint a session)."""
+    if not google.enabled():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "google login not configured")
+    state = secrets.token_urlsafe(24)
+    sync_redis().setex(f"oauth:gmail_connect:{state}", 600, identity.user.id)
+    return RedirectResponse(google.authorization_url(state, scope=_GMAIL_SCOPE, offline=True))
+
+
+@router.get("/google/gmail-callback")
+def google_gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
+    user_id = sync_redis().getdel(f"oauth:gmail_connect:{state}")
+    if user_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "bad state")
+    token, info = google.exchange(code, scope=_GMAIL_SCOPE)
+    sub = info.get("sub")
+    ident = db.query(OAuthIdentity).filter_by(provider="google", provider_sub=sub).first()
+    if ident is None or ident.user_id != user_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "identity mismatch")
+    ident.access_token_enc = encrypt(token["access_token"])
+    if token.get("refresh_token"):  # Google omits this on re-consent unless prompt=consent forced it
+        ident.refresh_token_enc = encrypt(token["refresh_token"])
+    ident.expires_at = utcnow() + timedelta(seconds=token.get("expires_in", 3600))
+    ident.scopes = sorted(set(ident.scopes) | {"gmail.send"})
+    return RedirectResponse(f"{get_settings().frontend_url}/settings?gmail=connected")
 
 
 # ---------------------------------------------------------------- impersonation

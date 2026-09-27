@@ -1,14 +1,19 @@
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { useMe } from "@/hooks/useMe";
 import { useFormat } from "@/hooks/useFormat";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { api } from "@/lib/api";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
   const me = useMe();
   const f = useFormat();
+  const [params] = useSearchParams();
   const u = me.data?.user;
+  const gmailConnected = params.get("gmail") === "connected";
   return (
     <div className="mx-auto w-full max-w-2xl p-6">
       <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
@@ -25,6 +30,25 @@ export default function SettingsPage() {
             <span className="truncate font-medium">{v || "—"}</span>
           </div>
         ))}
+      </Card>
+      <Card className="mt-4 flex items-center justify-between gap-4 p-5">
+        <div>
+          <p className="text-sm font-medium">{t("settings.gmail.title")}</p>
+          <p className="text-xs text-fog-500">{t("settings.gmail.subtitle")}</p>
+        </div>
+        {gmailConnected ? (
+          <span className="text-xs font-medium text-green-500">{t("settings.gmail.connected")}</span>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              window.location.href = api.auth.connectGmailUrl();
+            }}
+          >
+            {t("settings.gmail.connect")}
+          </Button>
+        )}
       </Card>
       <p className="mt-4 text-xs text-fog-700">{t("common.comingSoon")}</p>
     </div>

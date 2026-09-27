@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -24,6 +25,7 @@ from mainforte.events import handlers  # noqa: F401  (register default handlers)
 from mainforte.events import onboarding  # noqa: F401  (register onboarding handler)
 from mainforte.events.stream import sync_redis
 from mainforte.personas.routes import router as personas_router
+from mainforte.scheduler import scheduler
 from mainforte.tasks.routes import router as tasks_router
 from mainforte.widgets import router as widgets_router
 from mainforte.workspaces.routes import router as ws_router

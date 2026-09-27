@@ -162,6 +162,26 @@ _register(Tool(
     sandboxed=True,
 ))
 
+_register(Tool(
+    name="gmail_send",
+    description=(
+        "Send an email from the user's own connected Gmail account (not the app's transactional "
+        "sender) — use only when the user asked you to send mail as them, and only after they've "
+        "connected Gmail in Settings."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "to": {"type": "string", "description": "Recipient email address"},
+            "subject": {"type": "string"},
+            "body": {"type": "string"},
+        },
+        "required": ["to", "subject", "body"],
+    },
+    handler=_not_implemented,
+    sandboxed=True,
+))
+
 
 def _now(**_kwargs: Any) -> dict[str, str]:
     return {"utc": datetime.now(UTC).isoformat()}
