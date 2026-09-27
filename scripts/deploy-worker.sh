@@ -48,10 +48,14 @@ if [ -n "$CELERY_QUEUES" ]; then
 fi
 
 echo "  Starting..."
+# `docker compose images -q worker` only reports images for containers Compose has
+# created (i.e. after `up`/`run`), so it's empty here since we only ever `build`.
+# Reference the image's fixed tag directly instead (set via `image: mainforte-worker`
+# in docker-compose.yml).
 docker run -d \
     --name "$WORKER_NAME" \
     --restart unless-stopped \
     "${ENV_ARGS[@]}" \
-    "$(docker compose images -q worker)"
+    mainforte-worker
 
 echo "  Started. Liveness: AgentWorker.last_heartbeat where container_name=$WORKER_NAME"

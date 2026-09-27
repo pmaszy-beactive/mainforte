@@ -10,6 +10,7 @@ services:
       context: .
       dockerfile: Dockerfile.base
   worker:
+    image: mainforte-worker
     build:
       context: .
       dockerfile: Dockerfile.worker
