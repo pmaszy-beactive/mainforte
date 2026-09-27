@@ -182,6 +182,20 @@ export interface AdminTaskDetail {
   task: AdminTaskSummary & { plan: unknown[]; result: unknown; correlation_id: string | null; thread_id: string | null };
   events: WsEvent[];
 }
+/** GET/PUT /api/admin/settings/bastion-jenkins response shape: secret fields (the two SSH keys) are
+ * masked to a boolean (whether a value is currently set), never the plaintext or ciphertext. */
+export interface AdminBastionJenkinsSettings {
+  bastion_host: string | null;
+  bastion_port: number | null;
+  bastion_username: string | null;
+  bastion_ssh_key: boolean;
+  jenkins_host: string | null;
+  jenkins_port: number | null;
+  jenkins_username: string | null;
+  jenkins_ssh_key: boolean;
+  jenkins_provision_job: string | null;
+  jenkins_destroy_job: string | null;
+}
 
 /* Billing */
 export interface BillingPrice {

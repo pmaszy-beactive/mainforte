@@ -5,14 +5,12 @@ lib/jenkins.ts: app server -> SSH ProxyCommand through the bastion (jump
 host) -> Jenkins CLI `build <job> -p K=V` -> the Jenkins job runs
 deploy-worker.sh on a node.
 
-Unlike backbone (Postgres system_config + _decrypt_secret) and ActiveClaw
-(DB-backed settings), mainforte has no admin-UI secret store — settings are
-plain env vars via config.py. SSH key material is therefore read from files
-on disk (BASTION_SSH_KEY_PATH / JENKINS_SSH_KEY_PATH), never inline in an
-env var and never a DB blob. We still copy each key to a private 0600 temp
-file per call (not the configured path directly) so a single leaked temp
-file can't be replayed and so behavior matches the reference implementations
-exactly.
+Bastion/Jenkins config (including SSH key material) is admin-editable and
+DB-stored via db_settings.get_bastion_jenkins_config -- see that module's
+docstring for why this isn't just get_settings(). SSH keys are encrypted at
+rest and decrypted to plain text in memory here; we still copy each key to a
+private 0600 temp file per call (never write the DB/env value to a fixed
+path) so a single leaked temp file can't be replayed.
 """
 from __future__ import annotations
 
@@ -21,10 +19,7 @@ import os
 import shlex
 import subprocess
 import tempfile
-from pathlib import Path
 from typing import Any
-
-from mainforte.config import get_settings
 
 logger = logging.getLogger("mainforte.jenkins_ssh")
 
@@ -42,9 +37,8 @@ def _redact_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
     return out
 
 
-def _write_key_file(key_path: str) -> str:
-    """Copy the configured key file to a private 0600 temp file for this call."""
-    key_text = Path(key_path).read_text()
+def _write_key_file(key_text: str) -> str:
+    """Write key material to a private 0600 temp file for this call."""
     kf = tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False)
     try:
         kf.write(key_text)
@@ -66,14 +60,14 @@ def _cleanup_key_files(*paths: str | None) -> None:
 
 def _is_configured(s) -> bool:
     return bool(
-        s.bastion_host and s.bastion_ssh_key_path and s.jenkins_host
+        s.bastion_host and s.bastion_ssh_key and s.jenkins_host
         and s.jenkins_provision_job and s.jenkins_destroy_job
     )
 
 
 def _run_jenkins_ssh(s, remote_cmd: str, timeout: int) -> subprocess.CompletedProcess:
-    bastion_key_file = _write_key_file(s.bastion_ssh_key_path)
-    jenkins_key_file = _write_key_file(s.jenkins_ssh_key_path or s.bastion_ssh_key_path)
+    bastion_key_file = _write_key_file(s.bastion_ssh_key)
+    jenkins_key_file = _write_key_file(s.jenkins_ssh_key or s.bastion_ssh_key)
 
     try:
         bastion_target = f"{s.bastion_username}@{s.bastion_host}" if s.bastion_username else s.bastion_host
@@ -120,9 +114,11 @@ def _build_ssh_cli_args(job_name: str, params: dict[str, Any] | None = None, wai
     return args
 
 
-def trigger_jenkins_build(job_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def trigger_jenkins_build(db, job_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Fire-and-forget: queues the build and returns once it's accepted."""
-    s = get_settings()
+    from mainforte.db_settings import get_bastion_jenkins_config
+
+    s = get_bastion_jenkins_config(db)
     if not _is_configured(s):
         logger.warning("Jenkins not configured — skipping build trigger for %s", job_name)
         return {"ok": False, "reason": "not_configured"}
@@ -145,14 +141,16 @@ def trigger_jenkins_build(job_name: str, params: dict[str, Any] | None = None) -
         return {"ok": False, "reason": "exception", "error": str(e)}
 
 
-def trigger_jenkins_build_sync(job_name: str, params: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
+def trigger_jenkins_build_sync(db, job_name: str, params: dict[str, Any] | None = None, timeout: int = 180) -> dict[str, Any]:
     """Blocks until the build finishes and returns its console output.
 
     Use only when the caller needs to parse the build's own stdout for a
     result (e.g. a newly-provisioned worker's identifying output) — the
     fire-and-forget trigger_jenkins_build has no way to report an outcome.
     """
-    s = get_settings()
+    from mainforte.db_settings import get_bastion_jenkins_config
+
+    s = get_bastion_jenkins_config(db)
     if not _is_configured(s):
         logger.warning("Jenkins not configured — skipping sync build trigger for %s", job_name)
         return {"ok": False, "reason": "not_configured", "output": ""}

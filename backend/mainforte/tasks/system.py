@@ -245,7 +245,7 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
             params = {"WORKER_NAME": name}
             if cfg["queues"]:
                 params["CELERY_QUEUES"] = cfg["queues"]
-            result = trigger_jenkins_build(s.jenkins_provision_job, params)
+            result = trigger_jenkins_build(db, s.jenkins_provision_job, params)
             if not result.get("ok"):
                 log.warning("reconcile_agent_workers[%s]: provision trigger failed for %s: %s", pool, name, result.get("reason"))
                 break
@@ -259,7 +259,7 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     victims = list(reversed(managed))[:to_remove]
     n = 0
     for w in victims:
-        result = trigger_jenkins_build(s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
+        result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
         if not result.get("ok"):
             log.warning("reconcile_agent_workers[%s]: destroy trigger failed for %s: %s", pool, w.container_name, result.get("reason"))
             continue
@@ -282,14 +282,13 @@ def reconcile_agent_workers() -> dict:
     Fails soft (never raises) when Jenkins/bastion settings are unset, matching jenkins_ssh's own
     not_configured convention -- this task runs on every beat tick regardless of whether the
     reconciler has been set up for this environment yet."""
-    from mainforte.config import get_settings
+    from mainforte.db_settings import get_bastion_jenkins_config
     from mainforte.jenkins_ssh import _is_configured
 
-    s = get_settings()
-    if not _is_configured(s):
-        return {"ok": False, "reason": "not_configured"}
-
     with db_session() as db:
+        s = get_bastion_jenkins_config(db)
+        if not _is_configured(s):
+            return {"ok": False, "reason": "not_configured"}
         return {pool: _reconcile_pool(db, s, pool, cfg) for pool, cfg in AGENT_WORKER_POOLS.items()}
 
 

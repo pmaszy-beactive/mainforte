@@ -291,6 +291,7 @@
     "badge": "Admin",
     "backToApp": "Retour à l'appli",
     "tabs": {
+      "settings": "Paramètres",
       "users": "Utilisateurs",
       "finances": "Finances",
       "errors": "Erreurs API",
@@ -298,6 +299,25 @@
       "tasks": "Exécutions",
       "workers": "Travailleurs",
       "events": "Événements"
+    },
+    "settings": {
+      "bastionJenkins": {
+        "title": "Bastion et Jenkins",
+        "description": "Utilisé pour la mise à l'échelle automatique des travailleurs via des déclenchements Jenkins CLI par SSH à travers le bastion.",
+        "bastionHost": "Hôte du bastion",
+        "bastionPort": "Port du bastion",
+        "bastionUsername": "Nom d'utilisateur du bastion",
+        "bastionSshKey": "Clé SSH du bastion",
+        "jenkinsHost": "Hôte Jenkins",
+        "jenkinsPort": "Port Jenkins",
+        "jenkinsUsername": "Nom d'utilisateur Jenkins",
+        "jenkinsSshKey": "Clé SSH Jenkins",
+        "provisionJob": "Nom de la tâche de provisionnement",
+        "destroyJob": "Nom de la tâche de destruction",
+        "keyAlreadySet": "Une clé est déjà configurée — collez-en une nouvelle pour la remplacer.",
+        "keyNotSet": "Aucune clé configurée — collez une clé privée au format PEM.",
+        "keyHint": "Laissez vide pour conserver la clé actuellement enregistrée."
+      }
     },
     "users": {
       "email": "Courriel",
