@@ -31,6 +31,14 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface Connection {
+  provider: string;
+  email: string | null;
+  scopes: string[];
+  connected_at: string;
+  expires_at: string | null;
+}
+
 export interface Actor {
   type: string;
   id: string;

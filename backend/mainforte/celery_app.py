@@ -45,7 +45,7 @@ celery.conf.update(
         "reconcile-agent-workers": {"task": "mainforte.tasks.system.reconcile_agent_workers", "schedule": 60.0},
     },
     imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work", "mainforte.tasks.billing",
-             "mainforte.tasks.healing", "mainforte.tasks.schedule"),
+             "mainforte.tasks.healing", "mainforte.tasks.schedule", "mainforte.push"),
 )
 
 

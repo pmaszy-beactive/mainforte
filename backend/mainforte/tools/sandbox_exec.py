@@ -221,6 +221,41 @@ def _gmail_send(workspace: Path, *, to: str, subject: str, body: str, secrets: d
     return {"message_id": resp.json().get("id")}
 
 
+def _calendar_list_events(workspace: Path, *, max_results: int = 10, secrets: dict, **_: Any) -> dict[str, Any]:
+    """Lists the user's connected Google Calendar's upcoming events. Same secret-handoff shape as
+    _gmail_send: the access token arrives via the stdin spec's `secrets` field, resolved and
+    decrypted (and refreshed if needed) by the caller in tasks/work.py."""
+    import httpx
+
+    token = secrets.get("calendar_access_token")
+    if not token:
+        raise ToolExecError("no connected Google Calendar for this workspace")
+    resp = httpx.get(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"maxResults": max_results, "orderBy": "startTime", "singleEvents": "true",
+                "timeMin": _utcnow_rfc3339()},
+        timeout=20,
+    )
+    if resp.status_code in (401, 403):
+        raise ToolExecError(f"calendar_list_events auth rejected ({resp.status_code}): {resp.text[:500]}")
+    if resp.status_code >= 400:
+        raise ToolExecError(f"calendar_list_events failed ({resp.status_code}): {resp.text[:500]}")
+    items = resp.json().get("items", [])
+    return {"events": [
+        {"id": e.get("id"), "summary": e.get("summary"),
+         "start": (e.get("start") or {}).get("dateTime") or (e.get("start") or {}).get("date"),
+         "end": (e.get("end") or {}).get("dateTime") or (e.get("end") or {}).get("date")}
+        for e in items
+    ]}
+
+
+def _utcnow_rfc3339() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _browser_extract_text(workspace: Path, **_: Any) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
@@ -254,6 +289,7 @@ HANDLERS = {
     "browser_extract_text": _browser_extract_text,
     "web_search": _web_search,
     "gmail_send": _gmail_send,
+    "calendar_list_events": _calendar_list_events,
 }
 
 

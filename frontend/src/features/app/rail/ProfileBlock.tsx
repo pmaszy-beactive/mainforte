@@ -1,16 +1,14 @@
-import { CreditCard, Languages, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { CreditCard, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
-import { LOCALES, type Locale } from "@/lib/locale";
 import { useAuth } from "@/stores/auth";
 import { useMe } from "@/hooks/useMe";
-import { ME_KEY } from "@/hooks/useMe";
 import { cn } from "@/lib/cn";
 
 export function ProfileBlock({ collapsed }: { collapsed: boolean }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const me = useMe();
   const user = me.data?.user;
   const clear = useAuth((s) => s.clear);
@@ -25,14 +23,6 @@ export function ProfileBlock({ collapsed }: { collapsed: boolean }) {
       nav("/login", { replace: true });
     },
   });
-
-  const setLocale = useMutation({
-    mutationFn: (locale: Locale) => api.me.update({ locale }),
-    onMutate: (locale) => void i18n.changeLanguage(locale),
-    onSettled: () => qc.invalidateQueries({ queryKey: ME_KEY }),
-  });
-
-  const nextLocale = (): Locale => LOCALES[(LOCALES.indexOf(i18n.language as Locale) + 1) % LOCALES.length];
 
   const itemCls = "flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-fog-300 hover:bg-white/5 hover:text-fog-100 ring-focus";
 
@@ -57,9 +47,6 @@ export function ProfileBlock({ collapsed }: { collapsed: boolean }) {
           <Link to="/app/settings" className={itemCls}>
             <Settings className="size-3.5" /> {t("app.profile.settings")}
           </Link>
-          <button className={itemCls} onClick={() => setLocale.mutate(nextLocale())} disabled={setLocale.isPending} title={t("app.profile.language")}>
-            <Languages className="size-3.5" /> {t(`locales.${nextLocale()}`)}
-          </button>
           <button className={itemCls} onClick={() => logout.mutate()} disabled={logout.isPending}>
             <LogOut className="size-3.5" /> {t("app.profile.logout")}
           </button>

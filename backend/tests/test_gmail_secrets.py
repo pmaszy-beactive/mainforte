@@ -35,6 +35,9 @@ class _FakeDb:
     def query(self, _model):
         return _FakeQuery(self._identity)
 
+    def commit(self):
+        pass
+
 
 class _FakeSession:
     def __init__(self, db: _FakeDb):
@@ -76,7 +79,7 @@ def test_no_connected_identity_returns_empty(monkeypatch):
 
 
 def test_identity_without_access_token_returns_empty(monkeypatch):
-    ident = SimpleNamespace(access_token_enc=None)
+    ident = SimpleNamespace(access_token_enc=None, expires_at=None, refresh_token_enc=None)
     db = _FakeDb(workspace=SimpleNamespace(owner_id="u-1"), identity=ident)
     _patch_db(monkeypatch, db)
 
@@ -84,10 +87,48 @@ def test_identity_without_access_token_returns_empty(monkeypatch):
 
 
 def test_connected_identity_returns_decrypted_token(monkeypatch):
-    ident = SimpleNamespace(access_token_enc=encrypt("tok-plaintext"))
+    ident = SimpleNamespace(access_token_enc=encrypt("tok-plaintext"), expires_at=None, refresh_token_enc=None)
     db = _FakeDb(workspace=SimpleNamespace(owner_id="u-1"), identity=ident)
     _patch_db(monkeypatch, db)
 
     result = work_mod._gmail_secrets("ws-1", "gmail_send")
 
     assert result == {"gmail_access_token": "tok-plaintext"}
+
+
+def test_expired_token_is_refreshed_and_persisted(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    ident = SimpleNamespace(
+        access_token_enc=encrypt("stale-token"),
+        refresh_token_enc=encrypt("refresh-tok"),
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+    db = _FakeDb(workspace=SimpleNamespace(owner_id="u-1"), identity=ident)
+    _patch_db(monkeypatch, db)
+
+    class _FakeGoogleClient:
+        def refresh_token(self, _url, refresh_token):
+            assert refresh_token == "refresh-tok"
+            return {"access_token": "fresh-token", "expires_in": 3600}
+
+    import mainforte.auth.google as google_mod
+
+    monkeypatch.setattr(google_mod, "client", lambda *a, **k: _FakeGoogleClient())
+
+    result = work_mod._gmail_secrets("ws-1", "gmail_send")
+
+    assert result == {"gmail_access_token": "fresh-token"}
+    from mainforte.crypto import decrypt
+
+    assert decrypt(ident.access_token_enc) == "fresh-token"
+
+
+def test_calendar_tool_uses_calendar_secret_key(monkeypatch):
+    ident = SimpleNamespace(access_token_enc=encrypt("cal-token"), expires_at=None, refresh_token_enc=None)
+    db = _FakeDb(workspace=SimpleNamespace(owner_id="u-1"), identity=ident)
+    _patch_db(monkeypatch, db)
+
+    result = work_mod._gmail_secrets("ws-1", "calendar_list_events")
+
+    assert result == {"calendar_access_token": "cal-token"}

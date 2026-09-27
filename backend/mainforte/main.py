@@ -25,8 +25,20 @@ from mainforte.events import handlers  # noqa: F401  (register default handlers)
 from mainforte.events import onboarding  # noqa: F401  (register onboarding handler)
 from mainforte.events.stream import sync_redis
 from mainforte.personas.routes import router as personas_router
+from mainforte.push import router as push_router
 from mainforte.scheduler import scheduler
 from mainforte.tasks.routes import router as tasks_router
+
+# The in-process scheduler (below) looks tasks up by name in `celery.tasks`, which Celery only
+# populates by importing celery_app.py's `imports` tuple -- and that import only happens
+# automatically inside a real `celery worker` process. This uvicorn process never runs one, so
+# without importing these modules directly, `celery.tasks` stays empty here and every scheduled
+# entry fails with "unknown task" (see PLAN.md's in-process-scheduler note above).
+from mainforte.tasks import billing as _tasks_billing  # noqa: F401
+from mainforte.tasks import healing as _tasks_healing  # noqa: F401
+from mainforte.tasks import schedule as _tasks_schedule  # noqa: F401
+from mainforte.tasks import system as _tasks_system  # noqa: F401
+from mainforte.tasks import work as _tasks_work  # noqa: F401
 from mainforte.widgets import router as widgets_router
 from mainforte.workspaces.routes import router as ws_router
 from mainforte.ws.routes import router as socket_router
@@ -47,13 +59,13 @@ async def lifespan(_app: FastAPI):
             scheduler.stop()
 
 
-app = FastAPI(title="Mainforte", version="0.1.34", docs_url="/api/docs", openapi_url="/api/openapi.json",
+app = FastAPI(title="Mainforte", version="0.1.35", docs_url="/api/docs", openapi_url="/api/openapi.json",
               lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth_router, me_router, ws_router, chat_router, personas_router, admin_router, socket_router,
-          tasks_router, widgets_router, billing_router, stripe_webhook_router):
+          tasks_router, widgets_router, billing_router, stripe_webhook_router, push_router):
     app.include_router(r)
 
 

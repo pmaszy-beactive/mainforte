@@ -34,7 +34,7 @@ from typing import Any
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
 from mainforte.config import get_settings
-from mainforte.crypto import decrypt
+from mainforte.crypto import decrypt, encrypt
 from mainforte.db.session import db_session
 from mainforte.events import emit
 from mainforte.events.task_qa import run_qa_sync
@@ -63,17 +63,43 @@ def _home_owner(ws_id: str) -> str | None:
         return ws.owner_id if ws is not None else None
 
 
+_GOOGLE_TOOL_SECRET_KEY = {
+    "gmail_send": "gmail_access_token",
+    "calendar_list_events": "calendar_access_token",
+}
+
+
+def _refresh_google_token(db, ident) -> str:
+    """Refreshes an expired/near-expiry Google access token lazily, right before it's handed to a
+    sandboxed tool call — simpler than a scheduled Celery job (PLAN.md's original sketch) since it
+    only ever refreshes tokens actually about to be used, and needs no new beat-schedule entry.
+    Persists the new access token (and expiry) back onto the same `OAuthIdentity` row."""
+    from datetime import timedelta
+
+    from mainforte.auth import google
+    from mainforte.db.base import utcnow
+
+    token = google.client().refresh_token(google.TOKEN_URL, refresh_token=decrypt(ident.refresh_token_enc))
+    ident.access_token_enc = encrypt(token["access_token"])
+    ident.expires_at = utcnow() + timedelta(seconds=token.get("expires_in", 3600))
+    db.commit()
+    return token["access_token"]
+
+
 def _gmail_secrets(ws_id: str, tool_name: str) -> dict[str, str]:
-    """Resolves the per-call secret for exactly the one tool that needs it — every other
-    sandboxed tool call gets `{}`. Mirrors `_home_owner`: a workspace's Gmail tool calls act as
-    the workspace owner's connected Gmail account (`Workspace.owner_id`), the same collapse-to-
+    """Resolves the per-call secret for exactly the Google-backed tools that need one — every
+    other sandboxed tool call gets `{}`. Mirrors `_home_owner`: a workspace's Google tool calls act
+    as the workspace owner's connected Google account (`Workspace.owner_id`), the same collapse-to-
     one-user precedent already used for S3 home staging above. Decrypted here, in the parent
     process, and handed to the sandboxed subprocess only via the stdin spec (see
-    `sandbox/v1_runuser.py`) — never as an env var, never persisted to disk. Token refresh (via
-    `refresh_token_enc` once `expires_at` has passed) is not implemented yet; an expired token
-    just fails the Gmail API call with a 401, surfaced as a normal tool error."""
-    if tool_name != "gmail_send":
+    `sandbox/v1_runuser.py`) — never as an env var, never persisted to disk. If the stored access
+    token is expired (or about to be), refreshes it via the stored refresh token before returning."""
+    secret_key = _GOOGLE_TOOL_SECRET_KEY.get(tool_name)
+    if secret_key is None:
         return {}
+    from datetime import timedelta
+
+    from mainforte.db.base import utcnow
     from mainforte.db.models import OAuthIdentity, Workspace
 
     with db_session() as db:
@@ -83,7 +109,12 @@ def _gmail_secrets(ws_id: str, tool_name: str) -> dict[str, str]:
         ident = db.query(OAuthIdentity).filter_by(user_id=ws.owner_id, provider="google").first()
         if ident is None or not ident.access_token_enc:
             return {}
-        return {"gmail_access_token": decrypt(ident.access_token_enc)}
+        near_expiry = ident.expires_at is not None and ident.expires_at <= utcnow() + timedelta(minutes=2)
+        if near_expiry and ident.refresh_token_enc:
+            access_token = _refresh_google_token(db, ident)
+        else:
+            access_token = decrypt(ident.access_token_enc)
+        return {secret_key: access_token}
 
 
 def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Path,

@@ -53,6 +53,19 @@ class OAuthIdentity(IdMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="identities")
 
 
+class PushToken(IdMixin, TimestampMixin, Base):
+    """A Capacitor device's push token, registered by the app after the user grants permission
+    (`POST /api/push/register`). Upserted on `(user_id, token)` so re-registering the same device
+    (app reinstall, token refresh) doesn't accumulate duplicate rows."""
+
+    __tablename__ = "push_tokens"
+    __table_args__ = (UniqueConstraint("user_id", "token", name="uq_push_token_user_token"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)  # ios | android | web
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class Workspace(IdMixin, TimestampMixin, Base):
     """A family / household / small team. Billing and bots are per workspace."""
 

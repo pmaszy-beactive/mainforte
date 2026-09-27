@@ -182,6 +182,22 @@ _register(Tool(
     sandboxed=True,
 ))
 
+_register(Tool(
+    name="calendar_list_events",
+    description=(
+        "List the user's upcoming events from their own connected Google Calendar — use only "
+        "after they've connected Calendar in Settings."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "max_results": {"type": "integer", "description": "Max events to return (default 10)"},
+        },
+    },
+    handler=_not_implemented,
+    sandboxed=True,
+))
+
 
 def _now(**_kwargs: Any) -> dict[str, str]:
     return {"utc": datetime.now(UTC).isoformat()}

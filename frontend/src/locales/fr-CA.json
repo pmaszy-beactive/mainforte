@@ -237,11 +237,20 @@
     "language": "Langue",
     "timezone": "Fuseau horaire",
     "workspaces": "Espaces de travail",
-    "gmail": {
-      "title": "Gmail",
-      "subtitle": "Laissez votre personnel envoyer des courriels depuis votre compte Gmail.",
-      "connect": "Connecter Gmail",
-      "connected": "Connecté"
+    "connections": {
+      "title": "Connexions",
+      "subtitle": "Laissez votre personnel agir en votre nom via ces comptes.",
+      "connect": "Connecter",
+      "disconnect": "Déconnecter",
+      "connected": "Connecté",
+      "scopes": {
+        "gmail.send": "Envoi de courriels",
+        "calendar": "Calendrier"
+      },
+      "google": {
+        "name": "Google",
+        "subtitle": "Envoi Gmail et accès au calendrier."
+      }
     }
   },
   "billing": {
