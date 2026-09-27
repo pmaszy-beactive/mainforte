@@ -1,4 +1,6 @@
-# Fat agent-worker image: python + chromium (playwright) + node + tools. Consumes chat,work,system queues.
+# Fat agent-worker image: python + chromium (playwright) + node + tools.
+# Consumes chat,work,system queues by default; override with CELERY_QUEUES
+# (e.g. "work" for a sandbox-only pool) to run a narrower pool instead.
 FROM mainforte-base
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["celery", "-A", "mainforte.celery_app", "worker", "--loglevel=info", "-Q", "chat,work,system"]
+CMD ["sh", "-c", "exec celery -A mainforte.celery_app worker --loglevel=info -Q ${CELERY_QUEUES:-chat,work,system}"]

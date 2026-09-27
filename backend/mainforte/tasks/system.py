@@ -195,75 +195,102 @@ def refresh_due_tasks() -> int:
 
 
 AGENT_WORKER_PREFIX = "mainforte-agent-worker-"
+AGENT_WORKER_SANDBOX_PREFIX = f"{AGENT_WORKER_PREFIX}sandbox-"
 AGENT_WORKER_MAX_PROVISION_PER_TICK = 2  # cap Jenkins job bursts, mirrors backbone's vexa_spare_pool.py
+
+# Two independently-scalable pools, both provisioned via the same Jenkins job
+# (now CELERY_QUEUES-parameterized, see Dockerfile.worker) but tracked under
+# distinct container-name prefixes and desired-count Setting keys so each
+# pool's reconciliation never touches the other's containers.
+#   "full"    — chat,work,system. Keeps the original mainforte-agent-worker-N
+#               naming (back-compat with any already-provisioned workers) but
+#               excludes the sandbox pool's names, which also start with that prefix.
+#   "sandbox" — work only (browser/bash tool execution, scaled independently
+#               of chat/LLM capacity), under its own mainforte-agent-worker-sandbox-N names.
+AGENT_WORKER_POOLS = {
+    "full": {"prefix": AGENT_WORKER_PREFIX, "exclude_prefix": AGENT_WORKER_SANDBOX_PREFIX,
+             "queues": None, "desired_key": "workers.desired"},
+    "sandbox": {"prefix": AGENT_WORKER_SANDBOX_PREFIX, "exclude_prefix": None,
+                "queues": "work", "desired_key": "workers.desired.sandbox"},
+}
+
+
+def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
+    from mainforte.jenkins_ssh import trigger_jenkins_build
+
+    prefix = cfg["prefix"]
+    desired_row = db.get(Setting, cfg["desired_key"])
+    default_desired = 1 if pool == "full" else 0
+    desired = desired_row.value.get("count", default_desired) if desired_row else default_desired
+
+    q = db.query(AgentWorker).filter(AgentWorker.container_name.like(f"{prefix}%"))
+    if cfg["exclude_prefix"]:
+        q = q.filter(~AgentWorker.container_name.like(f"{cfg['exclude_prefix']}%"))
+    managed = q.order_by(AgentWorker.container_name.asc()).all()
+    live = len(managed)
+
+    if live == desired:
+        return {"ok": True, "live": live, "desired": desired, "action": "none"}
+
+    if live < desired:
+        to_add = min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK)
+        used = {w.container_name for w in managed}
+        n = 0
+        idx = 1
+        while n < to_add:
+            name = f"{prefix}{idx}"
+            idx += 1
+            if name in used:
+                continue
+            params = {"WORKER_NAME": name}
+            if cfg["queues"]:
+                params["CELERY_QUEUES"] = cfg["queues"]
+            result = trigger_jenkins_build(s.jenkins_provision_job, params)
+            if not result.get("ok"):
+                log.warning("reconcile_agent_workers[%s]: provision trigger failed for %s: %s", pool, name, result.get("reason"))
+                break
+            emit(db, "worker.provisioning", ws_id=None, actor=("system", None),
+                 payload={"container_name": name, "pool": pool})
+            n += 1
+        return {"ok": True, "live": live, "desired": desired, "action": "provision", "triggered": n}
+
+    # live > desired: destroy the newest-named workers first, never worker #1 (excluded by prefix match)
+    to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
+    victims = list(reversed(managed))[:to_remove]
+    n = 0
+    for w in victims:
+        result = trigger_jenkins_build(s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
+        if not result.get("ok"):
+            log.warning("reconcile_agent_workers[%s]: destroy trigger failed for %s: %s", pool, w.container_name, result.get("reason"))
+            continue
+        emit(db, "worker.destroying", ws_id=None, actor=("system", None),
+             payload={"container_name": w.container_name, "pool": pool})
+        n += 1
+    return {"ok": True, "live": live, "desired": desired, "action": "destroy", "triggered": n}
 
 
 @celery.task(name="mainforte.tasks.system.reconcile_agent_workers")
 def reconcile_agent_workers() -> dict:
-    """Converges live AgentWorker count to admin-set desired count via Jenkins provision/destroy
-    jobs over SSH-through-bastion (PLAN.md §1.8). Scoped ONLY to rows whose container_name carries
-    this reconciler's own `mainforte-agent-worker-N` naming convention — the only names it ever
-    assigns via its own Jenkins-triggered deploy calls. Worker #1 (backbone's fixed worker,
-    self-registered by `worker_heartbeat` under an arbitrary MAINFORTE_WORKER_ID/hostname-derived
-    name) is excluded by construction, never by fragile "is this worker #1" detection.
+    """Converges each pool's live AgentWorker count to its admin-set desired count via Jenkins
+    provision/destroy jobs over SSH-through-bastion (PLAN.md §1.8). Scoped ONLY to rows whose
+    container_name carries this reconciler's own per-pool naming convention (AGENT_WORKER_POOLS) —
+    the only names it ever assigns via its own Jenkins-triggered deploy calls. Worker #1 (backbone's
+    fixed worker, self-registered by `worker_heartbeat` under an arbitrary
+    MAINFORTE_WORKER_ID/hostname-derived name) is excluded by construction, never by fragile "is
+    this worker #1" detection.
 
     Fails soft (never raises) when Jenkins/bastion settings are unset, matching jenkins_ssh's own
     not_configured convention -- this task runs on every beat tick regardless of whether the
     reconciler has been set up for this environment yet."""
     from mainforte.config import get_settings
-    from mainforte.jenkins_ssh import _is_configured, trigger_jenkins_build
+    from mainforte.jenkins_ssh import _is_configured
 
     s = get_settings()
     if not _is_configured(s):
         return {"ok": False, "reason": "not_configured"}
 
     with db_session() as db:
-        desired_row = db.get(Setting, "workers.desired")
-        desired = desired_row.value.get("count", 1) if desired_row else 1
-
-        managed = (
-            db.query(AgentWorker)
-            .filter(AgentWorker.container_name.like(f"{AGENT_WORKER_PREFIX}%"))
-            .order_by(AgentWorker.container_name.asc())
-            .all()
-        )
-        live = len(managed)
-
-        if live == desired:
-            return {"ok": True, "live": live, "desired": desired, "action": "none"}
-
-        if live < desired:
-            to_add = min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK)
-            used = {w.container_name for w in managed}
-            n = 0
-            idx = 1
-            while n < to_add:
-                name = f"{AGENT_WORKER_PREFIX}{idx}"
-                idx += 1
-                if name in used:
-                    continue
-                result = trigger_jenkins_build(s.jenkins_provision_job, {"WORKER_NAME": name})
-                if not result.get("ok"):
-                    log.warning("reconcile_agent_workers: provision trigger failed for %s: %s", name, result.get("reason"))
-                    break
-                emit(db, "worker.provisioning", ws_id=None, actor=("system", None),
-                     payload={"container_name": name})
-                n += 1
-            return {"ok": True, "live": live, "desired": desired, "action": "provision", "triggered": n}
-
-        # live > desired: destroy the newest-named workers first, never worker #1 (excluded above)
-        to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
-        victims = list(reversed(managed))[:to_remove]
-        n = 0
-        for w in victims:
-            result = trigger_jenkins_build(s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
-            if not result.get("ok"):
-                log.warning("reconcile_agent_workers: destroy trigger failed for %s: %s", w.container_name, result.get("reason"))
-                continue
-            emit(db, "worker.destroying", ws_id=None, actor=("system", None),
-                 payload={"container_name": w.container_name})
-            n += 1
-        return {"ok": True, "live": live, "desired": desired, "action": "destroy", "triggered": n}
+        return {pool: _reconcile_pool(db, s, pool, cfg) for pool, cfg in AGENT_WORKER_POOLS.items()}
 
 
 @celery.task(name="mainforte.tasks.system.refresh_widget")

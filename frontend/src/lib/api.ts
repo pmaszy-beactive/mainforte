@@ -174,6 +174,7 @@ export const api = {
     taskDetail: (id: string) => get<AdminTaskDetail>(`/api/admin/tasks/${encodeURIComponent(id)}`),
     workers: () => get<AdminWorkers>("/api/admin/workers"),
     setDesiredWorkers: (count: number) => post<void>("/api/admin/workers/desired", { count }),
+    setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
   },
