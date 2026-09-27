@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     sandbox_container_pids_limit: int = Field(128, alias="SANDBOX_CONTAINER_PIDS_LIMIT")
     sandbox_network_name: str = Field("mainforte_sandbox_net", alias="SANDBOX_NETWORK_NAME")
 
+    # In-process fallback for celery_app.py's beat_schedule (PLAN.md open item): backbone's api
+    # container runs plain uvicorn with no separate `celery beat` process, so beat-scheduled tasks
+    # never fire in prod today unless this is on. Defaults to is_prod so local dev -- which already
+    # runs a real `celery worker --beat` per README's combined dev command -- doesn't double-fire
+    # every task; set explicitly to force either way (e.g. to test it locally without the separate
+    # beat process running).
+    enable_in_process_scheduler: bool | None = Field(None, alias="ENABLE_IN_PROCESS_SCHEDULER")
+
     @property
     def jwt_secret(self) -> str:
         return self.auth_secret or self.secret_key
@@ -114,6 +122,12 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env in {"prod", "production"}
+
+    @property
+    def in_process_scheduler_enabled(self) -> bool:
+        if self.enable_in_process_scheduler is not None:
+            return self.enable_in_process_scheduler
+        return self.is_prod
 
     @property
     def sqlalchemy_url(self) -> str:
