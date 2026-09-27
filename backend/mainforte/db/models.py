@@ -357,6 +357,7 @@ class AgentWorker(IdMixin, TimestampMixin, Base):
     token_hash: Mapped[str | None] = mapped_column(String(128))
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     current_job: Mapped[str | None] = mapped_column(String(120))
+    version: Mapped[str | None] = mapped_column(String(20))  # app version this worker's image was built from
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 

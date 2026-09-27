@@ -6,6 +6,7 @@ import os
 import socket
 from datetime import timedelta
 
+from mainforte import __version__
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
@@ -29,8 +30,12 @@ def worker_heartbeat() -> None:
         if not w:
             w = AgentWorker(container_name=WORKER_ID, node=os.environ.get("NODE_NAME"), status="online")
             db.add(w)
-        w.status = "online"
+        # A draining worker's own heartbeat must not flip it back to "online" — reconcile is what
+        # moves it out of draining (by destroying it once idle), never the worker itself.
+        if w.status != "draining":
+            w.status = "online"
         w.last_heartbeat = utcnow()
+        w.version = __version__
         w.stats = {"pid": os.getpid()}
 
 
@@ -242,6 +247,44 @@ def get_pool_desired_counts(db) -> dict:
     return {"full": full, "sandbox": sandbox}
 
 
+def set_current_job(worker_id: str, job: str | None) -> None:
+    """Marks (or clears) the AgentWorker row's current_job — the reconciler's idle signal for
+    draining (see drain_worker/_worker_is_idle below). Called from task entrypoints in tasks/work.py
+    at start/end of a unit of work, not just from worker_heartbeat's own beat tick, so it reflects
+    reality immediately rather than lagging up to 30s behind the next heartbeat."""
+    with db_session() as db:
+        w = db.query(AgentWorker).filter_by(container_name=worker_id).first()
+        if w:
+            w.current_job = job
+
+
+def drain_worker(db, container_name: str, queues: str | None) -> None:
+    """Tells a running worker to stop consuming *new* tasks (Celery cancel_consumer on each of its
+    queues) while it keeps running and finishes whatever it already has, and marks it draining in
+    the DB. Idempotent — safe to call every reconcile tick until the worker is destroyed.
+
+    cancel_consumer is a RabbitMQ/Redis broker control command (mainforte uses amqp:// per
+    config.py) — no effect on brokers without remote-control support, but we still set the DB
+    status either way so _worker_is_idle/destroy logic isn't broker-dependent."""
+    queue_names = (queues or "chat,work,system").split(",")
+    try:
+        for q in queue_names:
+            celery.control.cancel_consumer(q, destination=[f"celery@{container_name}"])
+    except Exception as e:  # noqa: BLE001 — best-effort; DB draining flag is the source of truth below
+        log.warning("drain_worker: cancel_consumer failed for %s: %s", container_name, e)
+
+    w = db.query(AgentWorker).filter_by(container_name=container_name).first()
+    if w:
+        w.status = "draining"
+
+
+def _worker_is_idle(w: AgentWorker) -> bool:
+    """DB heartbeat state (current_job) is the source of truth for idleness, not a live broker RPC
+    (celery.control.inspect().active()) — a busy broker/connection blip can make inspect return no
+    reply within its timeout even for a genuinely idle worker, per Celery's own docs."""
+    return w.current_job is None
+
+
 def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     from mainforte.jenkins_ssh import trigger_jenkins_build
 
@@ -254,38 +297,54 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     managed = q.order_by(AgentWorker.container_name.asc()).all()
 
     stale = utcnow() - timedelta(seconds=90)
-    live = sum(1 for w in managed if not (w.status == "online" and (w.last_heartbeat or stale) <= stale))
+    def is_stale(w: AgentWorker) -> bool:
+        return w.status == "online" and (w.last_heartbeat or stale) <= stale
+    live_workers = [w for w in managed if not is_stale(w)]
+    live = len(live_workers)
+
+    # Rolling replace: some live worker is running an older build than this reconciler's own
+    # process — i.e. a redeploy happened. Handled before the plain count-based branches below so
+    # a version bump doesn't need a separate desired-count bump to kick off a swap.
+    outdated = [w for w in live_workers if w.status != "draining" and w.version and w.version != __version__]
+    draining = [w for w in live_workers if w.status == "draining"]
+
+    if outdated and live >= desired:
+        current_count = sum(1 for w in live_workers if w.version == __version__)
+        if current_count < desired:
+            return _provision(db, s, pool, cfg, managed, to_add=min(desired - current_count, AGENT_WORKER_MAX_PROVISION_PER_TICK))
+        # Enough current-version workers are up — start (or continue) retiring the oldest outdated one.
+        victim = min(outdated, key=lambda w: w.container_name or "")
+        drain_worker(db, victim.container_name, cfg["queues"])
+        emit(db, "worker.draining", ws_id=None, actor=("system", None),
+             payload={"container_name": victim.container_name, "pool": pool})
+        return {"ok": True, "live": live, "desired": desired, "action": "drain", "container_name": victim.container_name}
+
+    # A previously-draining worker becomes destroyable once idle, regardless of the count branches
+    # below — this runs every tick so a worker that finishes its in-flight job gets torn down
+    # promptly rather than waiting for the next live/desired mismatch.
+    idle_draining = [w for w in draining if _worker_is_idle(w)]
+    if idle_draining:
+        victim = idle_draining[0]
+        result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": victim.container_name})
+        if not result.get("ok"):
+            log.warning("reconcile_agent_workers[%s]: destroy trigger failed for draining %s: %s",
+                        pool, victim.container_name, result.get("reason"))
+        else:
+            emit(db, "worker.destroying", ws_id=None, actor=("system", None),
+                 payload={"container_name": victim.container_name, "pool": pool})
+        return {"ok": True, "live": live, "desired": desired, "action": "destroy_drained", "container_name": victim.container_name}
 
     if live == desired:
         return {"ok": True, "live": live, "desired": desired, "action": "none"}
 
     if live < desired:
-        to_add = min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK)
-        used = {w.container_name for w in managed}
-        n = 0
-        idx = 1
-        while n < to_add:
-            name = f"{prefix}{idx}"
-            idx += 1
-            if name in used:
-                continue
-            params = {"WORKER_NAME": name}
-            if s.worker_api_url:
-                params["API_URL"] = s.worker_api_url
-            if cfg["queues"]:
-                params["CELERY_QUEUES"] = cfg["queues"]
-            result = trigger_jenkins_build(db, s.jenkins_provision_job, params)
-            if not result.get("ok"):
-                log.warning("reconcile_agent_workers[%s]: provision trigger failed for %s: %s", pool, name, result.get("reason"))
-                break
-            emit(db, "worker.provisioning", ws_id=None, actor=("system", None),
-                 payload={"container_name": name, "pool": pool})
-            n += 1
-        return {"ok": True, "live": live, "desired": desired, "action": "provision", "triggered": n}
+        return _provision(db, s, pool, cfg, managed, to_add=min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK))
 
-    # live > desired: destroy the newest-named workers first, never worker #1 (excluded by prefix match)
+    # live > desired, no version drift: destroy the newest-named non-draining workers first, never
+    # worker #1 (excluded by prefix match).
+    candidates = [w for w in reversed(managed) if w.status != "draining"]
     to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
-    victims = list(reversed(managed))[:to_remove]
+    victims = candidates[:to_remove]
     n = 0
     for w in victims:
         result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
@@ -296,6 +355,33 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
              payload={"container_name": w.container_name, "pool": pool})
         n += 1
     return {"ok": True, "live": live, "desired": desired, "action": "destroy", "triggered": n}
+
+
+def _provision(db, s, pool: str, cfg: dict, managed: list, to_add: int) -> dict:
+    from mainforte.jenkins_ssh import trigger_jenkins_build
+
+    prefix = cfg["prefix"]
+    used = {w.container_name for w in managed}
+    n = 0
+    idx = 1
+    while n < to_add:
+        name = f"{prefix}{idx}"
+        idx += 1
+        if name in used:
+            continue
+        params = {"WORKER_NAME": name}
+        if s.worker_api_url:
+            params["API_URL"] = s.worker_api_url
+        if cfg["queues"]:
+            params["CELERY_QUEUES"] = cfg["queues"]
+        result = trigger_jenkins_build(db, s.jenkins_provision_job, params)
+        if not result.get("ok"):
+            log.warning("reconcile_agent_workers[%s]: provision trigger failed for %s: %s", pool, name, result.get("reason"))
+            break
+        emit(db, "worker.provisioning", ws_id=None, actor=("system", None),
+             payload={"container_name": name, "pool": pool})
+        n += 1
+    return {"ok": True, "live": len(managed), "action": "provision", "triggered": n}
 
 
 @celery.task(name="mainforte.tasks.system.reconcile_agent_workers")
