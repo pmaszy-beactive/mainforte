@@ -316,7 +316,10 @@
         "destroyJob": "Nom de la tâche de destruction",
         "keyAlreadySet": "Une clé est déjà configurée — collez-en une nouvelle pour la remplacer.",
         "keyNotSet": "Aucune clé configurée — collez une clé privée au format PEM.",
-        "keyHint": "Laissez vide pour conserver la clé actuellement enregistrée."
+        "keyHint": "Laissez vide pour conserver la clé actuellement enregistrée.",
+        "workerApiUrl": "URL de rappel du travailleur",
+        "workerApiUrlPlaceholder": "https://www.mainforte.ai",
+        "workerApiUrlHint": "L'URL que contacte un travailleur nouvellement provisionné. Laissez vide pour utiliser le FRONTEND_URL de cet environnement."
       }
     },
     "users": {

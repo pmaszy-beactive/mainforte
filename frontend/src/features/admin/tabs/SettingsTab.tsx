@@ -17,6 +17,7 @@ type FormState = {
   jenkins_ssh_key: string;
   jenkins_provision_job: string;
   jenkins_destroy_job: string;
+  worker_api_url: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -30,6 +31,7 @@ const EMPTY_FORM: FormState = {
   jenkins_ssh_key: "",
   jenkins_provision_job: "",
   jenkins_destroy_job: "",
+  worker_api_url: "",
 };
 
 function fromData(data: AdminBastionJenkinsSettings): FormState {
@@ -44,6 +46,7 @@ function fromData(data: AdminBastionJenkinsSettings): FormState {
     jenkins_ssh_key: "",
     jenkins_provision_job: data.jenkins_provision_job ?? "",
     jenkins_destroy_job: data.jenkins_destroy_job ?? "",
+    worker_api_url: data.worker_api_url ?? "",
   };
 }
 
@@ -70,6 +73,7 @@ export default function SettingsTab() {
         jenkins_ssh_key: form.jenkins_ssh_key || null,
         jenkins_provision_job: form.jenkins_provision_job || null,
         jenkins_destroy_job: form.jenkins_destroy_job || null,
+        worker_api_url: form.worker_api_url || null,
       }),
     onSuccess: (data) => {
       qc.setQueryData(["admin", "settings", "bastion-jenkins"], data);
@@ -93,6 +97,16 @@ export default function SettingsTab() {
           <h2 className="text-sm font-semibold text-fog-100">{t("admin.settings.bastionJenkins.title")}</h2>
           <p className="mt-1 text-xs text-fog-500">{t("admin.settings.bastionJenkins.description")}</p>
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label={t("admin.settings.bastionJenkins.workerApiUrl")}
+            value={form.worker_api_url}
+            onChange={set("worker_api_url")}
+            placeholder={t("admin.settings.bastionJenkins.workerApiUrlPlaceholder")}
+          />
+        </div>
+        <p className="text-xs text-fog-700">{t("admin.settings.bastionJenkins.workerApiUrlHint")}</p>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label={t("admin.settings.bastionJenkins.bastionHost")} value={form.bastion_host} onChange={set("bastion_host")} />

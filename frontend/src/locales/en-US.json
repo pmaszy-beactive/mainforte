@@ -316,7 +316,10 @@
         "destroyJob": "Destroy job name",
         "keyAlreadySet": "A key is already set — paste a new one to replace it.",
         "keyNotSet": "No key set yet — paste a PEM-format private key.",
-        "keyHint": "Leave blank to keep the currently stored key."
+        "keyHint": "Leave blank to keep the currently stored key.",
+        "workerApiUrl": "Worker callback URL",
+        "workerApiUrlPlaceholder": "https://www.mainforte.ai",
+        "workerApiUrlHint": "The URL a freshly-provisioned worker calls back to. Leave blank to use this environment's FRONTEND_URL."
       }
     },
     "users": {

@@ -31,6 +31,12 @@ BASTION_JENKINS_FIELDS: dict[str, tuple[str, bool]] = {
     "jenkins.ssh_key": ("jenkins_ssh_key", True),
     "jenkins.provision_job": ("jenkins_provision_job", False),
     "jenkins.destroy_job": ("jenkins_destroy_job", False),
+    # Not bastion/Jenkins config, but same admin-editable-per-environment need: the URL a
+    # freshly-provisioned worker calls back to. This is mainforte's own public URL (e.g.
+    # https://www.mainforte.ai in UAT), not backbone's -- falls back to config.py's
+    # frontend_url (env FRONTEND_URL), not api_url, since that's the value actually set
+    # correctly per-environment in the Jenkins job today.
+    "worker.api_url": ("worker_api_url", False),
 }
 
 # output attr -> config.py/env fallback attr, where the name differs (the two SSH keys: the env
@@ -38,6 +44,7 @@ BASTION_JENKINS_FIELDS: dict[str, tuple[str, bool]] = {
 _ENV_FALLBACK_ATTR = {
     "bastion_ssh_key": "bastion_ssh_key_path",
     "jenkins_ssh_key": "jenkins_ssh_key_path",
+    "worker_api_url": "frontend_url",
 }
 
 

@@ -235,6 +235,7 @@ class BastionJenkinsSettingsIn(BaseModel):
     jenkins_ssh_key: str | None = None  # PEM text; omitted/blank keeps the existing stored key
     jenkins_provision_job: str | None = None
     jenkins_destroy_job: str | None = None
+    worker_api_url: str | None = None
 
 
 @router.get("/settings/bastion-jenkins")
