@@ -8,7 +8,9 @@ internally still need the broker for that inner dispatch, exactly as they do und
 
 Reads cadence directly from `celery.conf.beat_schedule` (not a second hardcoded copy) so this can
 never silently drift from the Celery-side schedule. Each entry's `schedule` is either a plain
-number of seconds or a `celery.schedules.crontab` -- both expose `.remaining_estimate(last_run_at)`,
+number of seconds or a `celery.schedules.crontab`; a plain number is wrapped in
+`celery.schedules.schedule(...)` here since Celery only does that normalization inside its own beat
+service, which this code bypasses. Either way the result exposes `.remaining_estimate(last_run_at)`,
 which this scheduler uses to decide when each entry is next due, mirroring how Celery's own beat
 service drives its loop.
 
@@ -22,6 +24,8 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timezone
+
+from celery.schedules import BaseSchedule, schedule as celery_schedule
 
 from mainforte.celery_app import celery
 
@@ -62,7 +66,10 @@ class InProcessScheduler:
         now = datetime.now(timezone.utc)
         for name, entry in celery.conf.beat_schedule.items():
             last_run_at = self._last_run_at.get(name, now)
-            remaining = entry["schedule"].remaining_estimate(last_run_at).total_seconds()
+            sched = entry["schedule"]
+            if not isinstance(sched, BaseSchedule):
+                sched = celery_schedule(sched)
+            remaining = sched.remaining_estimate(last_run_at).total_seconds()
             if remaining > 0:
                 continue
             self._last_run_at[name] = now
