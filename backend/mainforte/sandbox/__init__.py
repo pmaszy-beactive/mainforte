@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 class Sandbox(Protocol):
     def run(self, *, tool_name: str, tool_input: dict[str, Any], workspace: Any, ws_id: str,
-             home_dir: Any, timeout_seconds: int) -> dict[str, Any]:
+             home_dir: Any, timeout_seconds: int, secrets: dict[str, str] | None = None) -> dict[str, Any]:
         """Runs one tool call in isolation and returns the parsed `sandbox_exec` JSON envelope
         (`{"ok": bool, "result": ...}` or `{"ok": bool, "error": str}`). Raises on infrastructure
         failure (timeout, launcher unreachable, malformed output) — never returns a raised

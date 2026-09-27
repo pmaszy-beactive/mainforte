@@ -236,7 +236,13 @@
     "email": "Email",
     "language": "Language",
     "timezone": "Timezone",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "gmail": {
+      "title": "Gmail",
+      "subtitle": "Let your staff send email from your Gmail account.",
+      "connect": "Connect Gmail",
+      "connected": "Connected"
+    }
   },
   "billing": {
     "title": "Billing",

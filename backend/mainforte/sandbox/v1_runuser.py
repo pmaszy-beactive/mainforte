@@ -38,9 +38,12 @@ def _minimal_env() -> dict[str, str]:
 
 class RunuserSandbox:
     def run(self, *, tool_name: str, tool_input: dict[str, Any], workspace: Path, ws_id: str,
-            home_dir: Path, timeout_seconds: int) -> dict[str, Any]:
+            home_dir: Path, timeout_seconds: int, secrets: dict[str, str] | None = None) -> dict[str, Any]:
         settings = get_settings()
-        spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": str(workspace)})
+        # per-call secrets (e.g. a user's decrypted Gmail token) go in the stdin spec, never in
+        # the subprocess env — _minimal_env() below stays a static, worker-wide allowlist only.
+        spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": str(workspace),
+                            "secrets": secrets or {}})
         argv = [sys.executable, "-m", "mainforte.tools.sandbox_exec"]
         if _RUNUSER is not None:
             argv = [_RUNUSER, "-u", str(settings.sandbox_uid), "--", *argv]

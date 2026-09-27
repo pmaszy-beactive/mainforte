@@ -236,7 +236,13 @@
     "email": "Courriel",
     "language": "Langue",
     "timezone": "Fuseau horaire",
-    "workspaces": "Espaces de travail"
+    "workspaces": "Espaces de travail",
+    "gmail": {
+      "title": "Gmail",
+      "subtitle": "Laissez votre personnel envoyer des courriels depuis votre compte Gmail.",
+      "connect": "Connecter Gmail",
+      "connected": "Connecté"
+    }
   },
   "billing": {
     "title": "Facturation",
