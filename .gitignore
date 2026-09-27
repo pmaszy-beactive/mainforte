@@ -26,3 +26,4 @@ frontend/.vite/
 celerybeat-schedule.db
 .deploy.env
 .env
+uv.lock
