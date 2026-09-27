@@ -6,4 +6,4 @@ if [ "${SKIP_MIGRATIONS:-0}" != "1" ]; then
   alembic upgrade head
   echo "[entrypoint] migrations at: $(alembic current 2>/dev/null | tail -1)"
 fi
-exec "$@"
+exec uvicorn mainforte.main:app --host 0.0.0.0 --port "${APP_PORT:-8000}" --proxy-headers --forwarded-allow-ips=*

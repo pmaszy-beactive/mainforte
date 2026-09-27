@@ -21,7 +21,6 @@ COPY alembic.ini ./
 COPY --from=frontend /fe/dist ./frontend/dist
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
-ENV PYTHONPATH=/app/backend PORT=8000
+ENV PYTHONPATH=/app/backend APP_PORT=8000
 EXPOSE 8000
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["uvicorn", "mainforte.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
