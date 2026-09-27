@@ -17,6 +17,8 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy import text as sa_text
+
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.aiproxy.pricing import estimate_cost_usd
@@ -161,6 +163,46 @@ async def ground_action_claims(db, *, ws_id: str, correlation_id: str | None, ap
         else:
             results.append({"claim": claim, "verified": False, "method": None, "reason": reason})
     return results
+
+
+def search_interaction_log(db, *, ws_id: str, query: str, thread_id: str | None = None,
+                            limit: int = 10) -> list[dict[str, Any]]:
+    """Task #37: workspace-wide (optionally thread-scoped), most-relevant-first text search over
+    the durable `events` log, for the long-tail case `_deterministic_context`'s last-20/30/
+    same-thread window misses -- verifying or justifying a claim from further back in a long
+    thread, or from a different thread entirely. Backed by the `text_fts` generated tsvector
+    column + GIN index (migration 0010), not embeddings (PLAN.md task #37 scope: FTS first,
+    embeddings only if this proves insufficient). Searches `chat.message.created` and
+    `persona.reply.ended` payloads only -- the two event types that carry `payload.text`.
+
+    Returns up to `limit` hits ordered by `ts_rank` (best match first), each:
+    `{event_id, type, thread_id, ts, text, rank}`. `text` is truncated to 500 chars, matching this
+    module's other claim/context truncation convention."""
+    if not query.strip():
+        return []
+
+    rows = db.execute(
+        sa_text(
+            """
+            select id, type, correlation_id, ts, payload->>'text' as text,
+                   ts_rank(text_fts, plainto_tsquery('english', :query)) as rank
+            from events
+            where ws_id = :ws_id
+              and type in ('chat.message.created', 'persona.reply.ended')
+              and text_fts @@ plainto_tsquery('english', :query)
+              and (:thread_id is null or correlation_id = :thread_id)
+            order by rank desc, id desc
+            limit :limit
+            """
+        ),
+        {"query": query, "ws_id": ws_id, "thread_id": thread_id, "limit": limit},
+    ).all()
+
+    return [
+        {"event_id": r.id, "type": r.type, "thread_id": r.correlation_id, "ts": r.ts,
+         "text": (r.text or "")[:500], "rank": float(r.rank)}
+        for r in rows
+    ]
 
 
 def _deterministic_context(db, *, ws_id: str, thread_id: str | None) -> str:

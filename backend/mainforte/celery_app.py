@@ -37,6 +37,7 @@ celery.conf.update(
         "sweep-outbox": {"task": "mainforte.tasks.system.sweep_outbox", "schedule": 30.0},
         "sweep-auth-tokens": {"task": "mainforte.tasks.system.sweep_auth_tokens", "schedule": 3600.0},
         "rollup-threads": {"task": "mainforte.tasks.system.rollup_threads", "schedule": crontab(hour=6, minute=0)},
+        "sweep-old-events": {"task": "mainforte.tasks.system.sweep_old_events", "schedule": crontab(hour=5, minute=30)},
         "refresh-due-widgets": {"task": "mainforte.tasks.system.refresh_due_widgets", "schedule": 300.0},
         "reconcile-subscriptions": {"task": "mainforte.tasks.billing.reconcile_subscriptions", "schedule": 3600.0},
         "sweep-stuck-tasks": {"task": "mainforte.tasks.healing.sweep_stuck_tasks", "schedule": 120.0},

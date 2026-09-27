@@ -57,6 +57,40 @@ def sweep_auth_tokens() -> int:
     return n
 
 
+# billing.* rows are excluded from retention: admin/routes.py's finances() sums
+# billing.usage.recorded across all time for MRR/cost reporting, so pruning them would silently
+# corrupt historical totals rather than just shrinking search/grounding lookback (PLAN.md task #37).
+EVENT_RETENTION_EXCLUDE_PREFIX = "billing."
+
+
+@celery.task(name="mainforte.tasks.system.sweep_old_events")
+def sweep_old_events() -> int:
+    """Daily: hard-deletes `events` rows older than `event_retention_days`, except billing.* (kept
+    forever for finance reporting). This must run *before* the FTS index is trusted to reflect "all
+    history" -- otherwise the index just gets more expensive to maintain over an unbounded table
+    with no corresponding search-reach guarantee (PLAN.md task #37 risk analysis). Deletes in
+    bounded batches so one run never holds a long-running lock on a large sweep."""
+    from mainforte.config import get_settings
+
+    settings = get_settings()
+    cutoff = utcnow() - timedelta(days=settings.event_retention_days)
+    total = 0
+    while True:
+        with db_session() as db:
+            ids = [
+                row[0] for row in db.query(Event.id)
+                .filter(Event.ts < cutoff, ~Event.type.like(f"{EVENT_RETENTION_EXCLUDE_PREFIX}%"))
+                .order_by(Event.id.asc()).limit(1000).all()
+            ]
+            if not ids:
+                break
+            db.query(Event).filter(Event.id.in_(ids)).delete(synchronize_session=False)
+            total += len(ids)
+        if len(ids) < 1000:
+            break
+    return total
+
+
 async def _summarize(*, api_key: str, transcript: str) -> str:
     system = ("Summarize this chat thread's activity into 2-4 sentences of durable, useful notes "
               "(preferences stated, decisions made, open items). Skip small talk.")

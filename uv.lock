@@ -553,7 +553,7 @@ wheels = [
 
 [[package]]
 name = "mainforte"
-version = "0.1.14"
+version = "0.1.26"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
