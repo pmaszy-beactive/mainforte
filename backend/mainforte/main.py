@@ -35,7 +35,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("mainforte")
 settings = get_settings()
 
-app = FastAPI(title="Mainforte", version="0.1.25", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if settings.in_process_scheduler_enabled:
+        scheduler.start()
+    try:
+        yield
+    finally:
+        if settings.in_process_scheduler_enabled:
+            scheduler.stop()
+
+
+app = FastAPI(title="Mainforte", version="0.1.25", docs_url="/api/docs", openapi_url="/api/openapi.json",
+              lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
