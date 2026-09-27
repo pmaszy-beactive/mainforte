@@ -24,9 +24,10 @@ _NETWORKED_TOOLS = {"bash", "browser_navigate", "browser_extract_text"}
 
 class DockerSandbox:
     def run(self, *, tool_name: str, tool_input: dict[str, Any], workspace: Path, ws_id: str,
-            home_dir: Path, timeout_seconds: int) -> dict[str, Any]:
+            home_dir: Path, timeout_seconds: int, secrets: dict[str, str] | None = None) -> dict[str, Any]:
         settings = get_settings()
-        spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": "/job"})
+        spec = json.dumps({"tool": tool_name, "input": tool_input, "workspace": "/job",
+                            "secrets": secrets or {}})
         req = {
             "tool_name": tool_name,
             "image": settings.sandbox_container_image,

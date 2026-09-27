@@ -4,11 +4,14 @@ so this process itself runs as the throwaway uid — never imported and called i
 `chat`-queue router (that's precisely the boundary Phase 2 drew between sandboxed and
 non-sandboxed tools).
 
-Protocol: job spec as JSON on stdin (`{"tool": str, "input": dict, "workspace": str}`); a single
-JSON object on stdout (`{"ok": true, "result": ...}` or `{"ok": false, "error": str}`). Anything
-on stderr is diagnostic only. `workspace` is an absolute path already created by the caller
-(`/work/<job_id>`) — every path-taking tool below resolves relative to it and refuses to escape it,
-since this is the one thing that must hold even if the uid-drop is somehow ineffective.
+Protocol: job spec as JSON on stdin (`{"tool": str, "input": dict, "workspace": str, "secrets":
+dict}`); a single JSON object on stdout (`{"ok": true, "result": ...}` or `{"ok": false, "error":
+str}`). Anything on stderr is diagnostic only. `workspace` is an absolute path already created by
+the caller (`/work/<job_id>`) — every path-taking tool below resolves relative to it and refuses to
+escape it, since this is the one thing that must hold even if the uid-drop is somehow ineffective.
+`secrets` carries per-call, per-user values (e.g. a decrypted Gmail token) that the caller resolved
+in the parent process and is handing to exactly this one job — it is never read from the process
+env, and every handler that doesn't need it just receives it into its `**_` catch-all.
 """
 from __future__ import annotations
 
@@ -185,6 +188,39 @@ def _web_search(workspace: Path, *, query: str, **_: Any) -> dict[str, Any]:
     return {"answer": answer, "citations": citations}
 
 
+def _build_rfc822(to: str, subject: str, body: str) -> str:
+    import base64
+    from email.mime.text import MIMEText
+
+    msg = MIMEText(body)
+    msg["to"] = to
+    msg["subject"] = subject
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+def _gmail_send(workspace: Path, *, to: str, subject: str, body: str, secrets: dict, **_: Any) -> dict[str, Any]:
+    """Sends from the user's own connected Gmail account (not the app's transactional SendGrid
+    sender in mail.py) — the access token is handed to us via the stdin spec's `secrets` field,
+    resolved and decrypted by the caller in tasks/work.py, never read from this process's env."""
+    import httpx
+
+    token = secrets.get("gmail_access_token")
+    if not token:
+        raise ToolExecError("no connected Gmail account for this workspace")
+    raw = _build_rfc822(to, subject, body)
+    resp = httpx.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"raw": raw},
+        timeout=20,
+    )
+    if resp.status_code in (401, 403):
+        raise ToolExecError(f"gmail_send auth rejected ({resp.status_code}): {resp.text[:500]}")
+    if resp.status_code >= 400:
+        raise ToolExecError(f"gmail_send failed ({resp.status_code}): {resp.text[:500]}")
+    return {"message_id": resp.json().get("id")}
+
+
 def _browser_extract_text(workspace: Path, **_: Any) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
@@ -217,6 +253,7 @@ HANDLERS = {
     "browser_navigate": _browser_navigate,
     "browser_extract_text": _browser_extract_text,
     "web_search": _web_search,
+    "gmail_send": _gmail_send,
 }
 
 
@@ -225,13 +262,14 @@ def main() -> int:
     tool_name = spec["tool"]
     tool_input = spec.get("input") or {}
     workspace = Path(spec["workspace"]).resolve()
+    secrets = spec.get("secrets") or {}
     handler = HANDLERS.get(tool_name)
     out: dict[str, Any]
     if handler is None:
         out = {"ok": False, "error": f"unknown sandboxed tool: {tool_name!r}"}
     else:
         try:
-            out = {"ok": True, "result": handler(workspace, **tool_input)}
+            out = {"ok": True, "result": handler(workspace, **tool_input, secrets=secrets)}
         except ToolExecError as e:
             out = {"ok": False, "error": str(e)}
         except subprocess.TimeoutExpired:

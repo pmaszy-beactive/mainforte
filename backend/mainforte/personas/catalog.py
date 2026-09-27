@@ -50,7 +50,15 @@ _PM = Archetype(
         "A task is worth creating only when it needs something a quick search can't give — repeated "
         "checking, filtering many options against real criteria, judgment across days or weeks. When "
         "that's the case, prefer a recurring task (attach a `schedule`) over a one-shot run, since "
-        "the value is usually in staying on it, not answering once."
+        "the value is usually in staying on it, not answering once.\n\n"
+        "When a plan includes a `web_search` stage to find candidate listings, options, or offers to "
+        "compare (shopping, deal-hunting, availability-watching, and similar), always follow it with "
+        "one or more `browser_navigate` + `browser_extract_text` stages against the most promising "
+        "result URLs. A search snippet alone is exactly the 30-second-lookup value the member could "
+        "already get themselves — the point of the task is opening and reading each real candidate "
+        "for the detail (price, mileage, seller, availability, terms) the snippet doesn't show. Never "
+        "let a plan jump straight from `web_search` to QA or a widget without those detail-extraction "
+        "stages in between."
     ),
 )
 

@@ -34,6 +34,7 @@ from typing import Any
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.celery_app import celery
 from mainforte.config import get_settings
+from mainforte.crypto import decrypt
 from mainforte.db.session import db_session
 from mainforte.events import emit
 from mainforte.events.task_qa import run_qa_sync
@@ -62,6 +63,29 @@ def _home_owner(ws_id: str) -> str | None:
         return ws.owner_id if ws is not None else None
 
 
+def _gmail_secrets(ws_id: str, tool_name: str) -> dict[str, str]:
+    """Resolves the per-call secret for exactly the one tool that needs it — every other
+    sandboxed tool call gets `{}`. Mirrors `_home_owner`: a workspace's Gmail tool calls act as
+    the workspace owner's connected Gmail account (`Workspace.owner_id`), the same collapse-to-
+    one-user precedent already used for S3 home staging above. Decrypted here, in the parent
+    process, and handed to the sandboxed subprocess only via the stdin spec (see
+    `sandbox/v1_runuser.py`) — never as an env var, never persisted to disk. Token refresh (via
+    `refresh_token_enc` once `expires_at` has passed) is not implemented yet; an expired token
+    just fails the Gmail API call with a 401, surfaced as a normal tool error."""
+    if tool_name != "gmail_send":
+        return {}
+    from mainforte.db.models import OAuthIdentity, Workspace
+
+    with db_session() as db:
+        ws = db.get(Workspace, ws_id)
+        if ws is None:
+            return {}
+        ident = db.query(OAuthIdentity).filter_by(user_id=ws.owner_id, provider="google").first()
+        if ident is None or not ident.access_token_enc:
+            return {}
+        return {"gmail_access_token": decrypt(ident.access_token_enc)}
+
+
 def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Path,
                     ws_id: str) -> dict[str, Any]:
     """Stages the workspace's owning user's S3 home into `workspace/home/` before running the
@@ -83,6 +107,7 @@ def _run_sandboxed(*, tool_name: str, tool_input: dict[str, Any], workspace: Pat
         return get_sandbox().run(
             tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id,
             home_dir=home_dir, timeout_seconds=settings.sandbox_timeout_seconds,
+            secrets=_gmail_secrets(ws_id, tool_name),
         )
     finally:
         if user_id is not None:
