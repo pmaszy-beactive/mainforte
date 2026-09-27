@@ -286,6 +286,7 @@
       "finances": "Finances",
       "errors": "API Errors",
       "jobs": "Jobs",
+      "tasks": "Tasks",
       "workers": "Workers",
       "events": "Events"
     },
@@ -329,6 +330,20 @@
       "running": "Running",
       "noQueues": "No queues reported.",
       "empty": "Nothing running."
+    },
+    "tasks": {
+      "status": "Status",
+      "workspace": "Workspace",
+      "persona": "Persona",
+      "stage": "Stage",
+      "attempt": "Attempt",
+      "created": "Created",
+      "filterStatus": "Filter by status…",
+      "filterWorkspace": "Workspace id…",
+      "empty": "No tasks.",
+      "events": "Event timeline",
+      "plan": "Plan",
+      "result": "Result"
     },
     "workers": {
       "status": "Status",

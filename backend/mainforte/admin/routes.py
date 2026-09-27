@@ -2,14 +2,26 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import Numeric, case, func
 from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, require_superuser
 from mainforte.db.base import utcnow
-from mainforte.db.models import AgentWorker, ApiError, Event, Membership, Price, Setting, Subscription, User, Workspace
+from mainforte.db.models import (
+    AgentWorker,
+    ApiError,
+    Event,
+    Membership,
+    Persona,
+    Price,
+    Setting,
+    Subscription,
+    Task,
+    User,
+    Workspace,
+)
 from mainforte.db.session import get_db
 from mainforte.events.bus import to_dict
 from mainforte.events.types import EVENT_TYPES
@@ -97,6 +109,45 @@ def jobs():
     except Exception:
         pass
     return {"queues": [{"name": n, "depth": d} for n, d in queue_depths().items()], "running": running}
+
+
+def _task_summary(t: Task, ws_name: str | None, persona_name: str | None) -> dict:
+    return {"id": t.id, "ws_id": t.ws_id, "ws_name": ws_name, "persona_id": t.persona_id,
+            "persona_name": persona_name, "status": t.status, "current_stage": t.current_stage,
+            "plan_len": len(t.plan or []), "attempt": t.attempt, "schedule": t.schedule,
+            "created_at": t.created_at.isoformat(), "updated_at": t.updated_at.isoformat()}
+
+
+@router.get("/tasks")
+def tasks(status: str | None = None, workspace_id: str | None = None,
+          limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+    q = db.query(Task, Workspace.name, Persona.name).join(Workspace, Workspace.id == Task.ws_id) \
+        .outerjoin(Persona, Persona.id == Task.persona_id)
+    if status:
+        q = q.filter(Task.status == status)
+    if workspace_id:
+        q = q.filter(Task.ws_id == workspace_id)
+    rows = q.order_by(Task.created_at.desc()).limit(limit).all()
+    return {"tasks": [_task_summary(t, ws_name, persona_name) for t, ws_name, persona_name in rows]}
+
+
+@router.get("/tasks/{task_id}")
+def task_detail(task_id: str, db: Session = Depends(get_db)):
+    row = db.query(Task, Workspace.name, Persona.name).join(Workspace, Workspace.id == Task.ws_id) \
+        .outerjoin(Persona, Persona.id == Task.persona_id).filter(Task.id == task_id).first()
+    if row is None:
+        raise HTTPException(404, "task not found")
+    t, ws_name, persona_name = row
+    base_corr = t.correlation_id or t.id
+    events = (
+        db.query(Event)
+        .filter((Event.correlation_id == base_corr) | (Event.correlation_id.like(f"{base_corr}:%")))
+        .order_by(Event.id.asc())
+        .all()
+    )
+    task_out = _task_summary(t, ws_name, persona_name)
+    task_out.update({"plan": t.plan, "result": t.result, "correlation_id": t.correlation_id, "thread_id": t.thread_id})
+    return {"task": task_out, "events": [to_dict(e) for e in events]}
 
 
 class DesiredIn(BaseModel):

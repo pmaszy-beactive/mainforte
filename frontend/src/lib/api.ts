@@ -3,6 +3,8 @@ import type {
   AdminError,
   AdminFinances,
   AdminJobs,
+  AdminTaskDetail,
+  AdminTasks,
   AdminUser,
   AdminWorkers,
   AuthResponse,
@@ -158,6 +160,9 @@ export const api = {
     finances: () => get<AdminFinances>("/api/admin/finances"),
     errors: (limit = 100) => get<{ errors: AdminError[] }>("/api/admin/errors", { limit }),
     jobs: () => get<AdminJobs>("/api/admin/jobs"),
+    tasks: (q?: { status?: string; workspace_id?: string; limit?: number }) =>
+      get<AdminTasks>("/api/admin/tasks", q),
+    taskDetail: (id: string) => get<AdminTaskDetail>(`/api/admin/tasks/${encodeURIComponent(id)}`),
     workers: () => get<AdminWorkers>("/api/admin/workers"),
     setDesiredWorkers: (count: number) => post<void>("/api/admin/workers/desired", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
