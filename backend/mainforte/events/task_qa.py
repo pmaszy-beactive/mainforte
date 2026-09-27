@@ -25,17 +25,29 @@ def _stage_claims(db: Session, *, base_corr: str, first_stage: int,
     `tool.error` events found in the window: a `continue_on_error` stage lets `run_task_stage`
     advance past a failed tool call with no `tool.ended` claim to ground — silently, unless QA
     itself treats that hole as a failure, so it's surfaced here as an unconditional QA failure
-    rather than the vacuous "no claims, so it passed" a missing tool.ended would otherwise imply."""
+    rather than the vacuous "no claims, so it passed" a missing tool.ended would otherwise imply.
+
+    A retried stage reruns under the same `stage_corr` (retries don't change `stage_index`), so a
+    stage that failed once and then succeeded has both a stale `tool.error` from the failed attempt
+    and a fresh `tool.ended` from the retry under one correlation_id. Only the latest attempt's
+    outcome should count, so events are scoped to at-or-after that stage's latest `tool.started`."""
     claims: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for stage_index in range(first_stage, last_stage):
         stage_corr = f"{base_corr}:{stage_index}"
-        rows = (
+        latest_start = (
+            db.query(Event.id)
+            .filter(Event.correlation_id == stage_corr, Event.type == "tool.started")
+            .order_by(Event.id.desc()).first()
+        )
+        query = (
             db.query(Event)
             .filter(Event.correlation_id == stage_corr,
                     Event.type.in_(("tool.ended", "agent.work.ended", "tool.error")))
-            .order_by(Event.id.asc()).all()
         )
+        if latest_start is not None:
+            query = query.filter(Event.id >= latest_start[0])
+        rows = query.order_by(Event.id.asc()).all()
         for ev in rows:
             name = ev.payload.get("name") or ev.payload.get("tool") or "tool"
             if ev.type == "tool.error":
