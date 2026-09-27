@@ -159,15 +159,11 @@ class DesiredIn(BaseModel):
 def workers(db: Session = Depends(get_db)):
     from mainforte.db_settings import get_bastion_jenkins_config
     from mainforte.jenkins_ssh import _is_configured
-    from mainforte.tasks.system import AGENT_WORKER_POOLS
+    from mainforte.tasks.system import get_pool_desired_counts
 
     stale = utcnow() - timedelta(seconds=90)
-    rows = db.query(AgentWorker).order_by(AgentWorker.created_at.asc()).all()
-    pools = {}
-    for pool, cfg in AGENT_WORKER_POOLS.items():
-        desired_row = db.get(Setting, cfg["desired_key"])
-        default_desired = 1 if pool == "full" else 0
-        pools[pool] = desired_row.value.get("count", default_desired) if desired_row else default_desired
+    rows = db.query(AgentWorker).order_by(AgentWorker.last_heartbeat.desc().nullslast()).all()
+    pools = get_pool_desired_counts(db)
 
     return {"desired": pools["full"],  # back-compat: existing UI reads this as the default pool's count
             "pools": pools,
@@ -180,20 +176,25 @@ def workers(db: Session = Depends(get_db)):
 
 @router.post("/workers/desired")
 def set_desired(body: DesiredIn, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
-    return _set_pool_desired(db, "workers.desired", body.count, ident)
+    return _set_pool_desired(db, "full", body.count, ident)
 
 
 @router.post("/workers/desired/sandbox")
 def set_desired_sandbox(body: DesiredIn, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
-    return _set_pool_desired(db, "workers.desired.sandbox", body.count, ident)
+    return _set_pool_desired(db, "sandbox", body.count, ident)
 
 
-def _set_pool_desired(db: Session, setting_key: str, count: int, ident: Identity) -> dict:
-    row = db.get(Setting, setting_key)
+def _set_pool_desired(db: Session, pool_field: str, count: int, ident: Identity) -> dict:
+    from mainforte.tasks.system import WORKERS_DESIRED_KEY, get_pool_desired_counts
+
+    current = get_pool_desired_counts(db)
+    current[pool_field] = count
+    row = db.get(Setting, WORKERS_DESIRED_KEY)
+    value = {**current, "by": ident.real_user.email}
     if row:
-        row.value = {"count": count, "by": ident.real_user.email}
+        row.value = value
     else:
-        db.add(Setting(key=setting_key, value={"count": count, "by": ident.real_user.email}))
+        db.add(Setting(key=WORKERS_DESIRED_KEY, value=value))
     # reconcile_agent_workers (tasks/system.py, beat every 60s) converges live count → desired via Jenkins up/down jobs.
     return {"desired": count}
 

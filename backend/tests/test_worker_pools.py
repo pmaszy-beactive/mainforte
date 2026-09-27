@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from mainforte.tasks.system import AGENT_WORKER_POOLS, _reconcile_pool
+from mainforte.tasks.system import AGENT_WORKER_POOLS, _reconcile_pool, get_pool_desired_counts
 
 
 def test_pool_prefixes_do_not_overlap():
@@ -47,7 +47,7 @@ class _FakeDB:
 
 def test_sandbox_pool_provision_sends_celery_queues():
     db = _FakeDB(rows=[])
-    db.settings["workers.desired.sandbox"] = MagicMock(value={"count": 1})
+    db.settings["workers.desired"] = MagicMock(value={"full": 0, "sandbox": 1})
     settings = MagicMock(jenkins_provision_job="provision-job")
 
     with patch("mainforte.jenkins_ssh.trigger_jenkins_build", return_value={"ok": True}) as trigger:
@@ -62,7 +62,7 @@ def test_sandbox_pool_provision_sends_celery_queues():
 
 def test_full_pool_provision_omits_celery_queues():
     db = _FakeDB(rows=[])
-    db.settings["workers.desired"] = MagicMock(value={"count": 1})
+    db.settings["workers.desired"] = MagicMock(value={"full": 1, "sandbox": 0})
     settings = MagicMock(jenkins_provision_job="provision-job")
 
     with patch("mainforte.jenkins_ssh.trigger_jenkins_build", return_value={"ok": True}) as trigger:
@@ -73,3 +73,21 @@ def test_full_pool_provision_omits_celery_queues():
     assert trigger.call_count == 1
     _, _, params = trigger.call_args[0]
     assert "CELERY_QUEUES" not in params
+
+
+def test_get_pool_desired_counts_merged_row():
+    db = _FakeDB(rows=[])
+    db.settings["workers.desired"] = MagicMock(value={"full": 2, "sandbox": 3})
+    assert get_pool_desired_counts(db) == {"full": 2, "sandbox": 3}
+
+
+def test_get_pool_desired_counts_falls_back_to_legacy_sandbox_key():
+    db = _FakeDB(rows=[])
+    db.settings["workers.desired"] = MagicMock(value={"count": 2})  # pre-merge "full" row
+    db.settings["workers.desired.sandbox"] = MagicMock(value={"count": 3})  # pre-merge "sandbox" row
+    assert get_pool_desired_counts(db) == {"full": 2, "sandbox": 3}
+
+
+def test_get_pool_desired_counts_defaults_when_no_rows():
+    db = _FakeDB(rows=[])
+    assert get_pool_desired_counts(db) == {"full": 1, "sandbox": 0}

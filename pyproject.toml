@@ -1,6 +1,6 @@
 [project]
 name = "mainforte"
-version = "0.1.38"
+version = "0.1.39"
 description = "Mainforte v3 — AI staff that actually do the work"
 requires-python = ">=3.12,<3.13"
 dependencies = [
