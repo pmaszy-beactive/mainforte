@@ -24,3 +24,5 @@ frontend/.vite/
 /work/
 .data/
 celerybeat-schedule.db
+.deploy.env
+.env
