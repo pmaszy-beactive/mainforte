@@ -195,6 +195,7 @@ export interface AdminBastionJenkinsSettings {
   jenkins_ssh_key: boolean;
   jenkins_provision_job: string | null;
   jenkins_destroy_job: string | null;
+  worker_api_url: string | null;
 }
 
 /* Billing */

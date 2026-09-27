@@ -270,6 +270,8 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
             if name in used:
                 continue
             params = {"WORKER_NAME": name}
+            if s.worker_api_url:
+                params["API_URL"] = s.worker_api_url
             if cfg["queues"]:
                 params["CELERY_QUEUES"] = cfg["queues"]
             result = trigger_jenkins_build(db, s.jenkins_provision_job, params)
