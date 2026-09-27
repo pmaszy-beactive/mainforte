@@ -200,8 +200,9 @@ AGENT_WORKER_MAX_PROVISION_PER_TICK = 2  # cap Jenkins job bursts, mirrors backb
 
 # Two independently-scalable pools, both provisioned via the same Jenkins job
 # (now CELERY_QUEUES-parameterized, see Dockerfile.worker) but tracked under
-# distinct container-name prefixes and desired-count Setting keys so each
-# pool's reconciliation never touches the other's containers.
+# distinct container-name prefixes so each pool's reconciliation never touches
+# the other's containers. Desired counts for both pools live together in the
+# single "workers.desired" Setting row (see get_pool_desired_counts below).
 #   "full"    — chat,work,system. Keeps the original mainforte-agent-worker-N
 #               naming (back-compat with any already-provisioned workers) but
 #               excludes the sandbox pool's names, which also start with that prefix.
@@ -209,25 +210,51 @@ AGENT_WORKER_MAX_PROVISION_PER_TICK = 2  # cap Jenkins job bursts, mirrors backb
 #               of chat/LLM capacity), under its own mainforte-agent-worker-sandbox-N names.
 AGENT_WORKER_POOLS = {
     "full": {"prefix": AGENT_WORKER_PREFIX, "exclude_prefix": AGENT_WORKER_SANDBOX_PREFIX,
-             "queues": None, "desired_key": "workers.desired"},
+             "queues": None, "desired_field": "full"},
     "sandbox": {"prefix": AGENT_WORKER_SANDBOX_PREFIX, "exclude_prefix": None,
-                "queues": "work", "desired_key": "workers.desired.sandbox"},
+                "queues": "work", "desired_field": "sandbox"},
 }
+
+WORKERS_DESIRED_KEY = "workers.desired"
+_LEGACY_SANDBOX_DESIRED_KEY = "workers.desired.sandbox"  # pre-merge key, read once as a migration fallback
+
+
+def get_pool_desired_counts(db) -> dict:
+    """Returns {"full": N, "sandbox": M} from the single workers.desired Setting row.
+
+    Migration note: before pool counts were merged into one row, "full" lived at this same
+    "workers.desired" key and "sandbox" lived separately at "workers.desired.sandbox". A merged
+    row's "full"/"sandbox" fields always win; either field missing from it (e.g. a row saved
+    before the merge, which only ever had "count") falls back to that pool's old default, or to
+    the legacy sandbox row if one still exists, so existing desired counts aren't silently reset.
+    """
+    row = db.get(Setting, WORKERS_DESIRED_KEY)
+    value = row.value if row else {}
+
+    full = value.get("full", value.get("count", 1))
+
+    if "sandbox" in value:
+        sandbox = value["sandbox"]
+    else:
+        legacy = db.get(Setting, _LEGACY_SANDBOX_DESIRED_KEY)
+        sandbox = legacy.value.get("count", 0) if legacy else 0
+
+    return {"full": full, "sandbox": sandbox}
 
 
 def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     from mainforte.jenkins_ssh import trigger_jenkins_build
 
     prefix = cfg["prefix"]
-    desired_row = db.get(Setting, cfg["desired_key"])
-    default_desired = 1 if pool == "full" else 0
-    desired = desired_row.value.get("count", default_desired) if desired_row else default_desired
+    desired = get_pool_desired_counts(db)[cfg["desired_field"]]
 
     q = db.query(AgentWorker).filter(AgentWorker.container_name.like(f"{prefix}%"))
     if cfg["exclude_prefix"]:
         q = q.filter(~AgentWorker.container_name.like(f"{cfg['exclude_prefix']}%"))
     managed = q.order_by(AgentWorker.container_name.asc()).all()
-    live = len(managed)
+
+    stale = utcnow() - timedelta(seconds=90)
+    live = sum(1 for w in managed if not (w.status == "online" and (w.last_heartbeat or stale) <= stale))
 
     if live == desired:
         return {"ok": True, "live": live, "desired": desired, "action": "none"}
