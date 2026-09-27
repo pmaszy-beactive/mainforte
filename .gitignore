@@ -18,6 +18,16 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# capacitor native build output (ios/, android/ project dirs themselves are committed)
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+frontend/ios/App/DerivedData/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/capacitor-cordova-android-plugins/build/
+frontend/android/local.properties
+
 # misc
 .DS_Store
 *.log

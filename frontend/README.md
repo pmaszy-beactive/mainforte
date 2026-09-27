@@ -25,4 +25,4 @@ Routes are plain (no hash) and lazy-loaded; there is no SSR so the bundle can be
 
 ## Mobile
 
-Set `VITE_API_URL` to the public API origin before `pnpm build`, then point Capacitor's `webDir` at `frontend/dist`.
+`ios/` and `android/` are Capacitor-generated native shells (config: `capacitor.config.ts`). Set `VITE_API_URL` to the public API origin before `npm run build` (there's no same-origin API to proxy to inside a native shell), then `npx cap sync` to copy the fresh `dist/` into both projects. Push notifications use `@capacitor/push-notifications`; the device token is registered with the backend via `POST /api/push/register` (see `src/hooks/usePushRegistration.ts`). Store submission (signing, listings, developer accounts) is manual, out of scope here — this only produces buildable native shells.

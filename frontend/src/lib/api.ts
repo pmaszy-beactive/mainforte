@@ -11,6 +11,7 @@ import type {
   BillingState,
   BillingSubscription,
   ChatPostResponse,
+  Connection,
   Me,
   Task,
   Widget,
@@ -110,9 +111,17 @@ export const api = {
     resetPassword: (b: { token: string; password: string }) => post<void>("/api/auth/reset-password", b),
     logout: () => post<void>("/api/auth/logout"),
     googleStartUrl: () => `${API_URL}/api/auth/google/start`,
-    connectGmailUrl: () => authedUrl(`${API_URL}/api/auth/google/connect-gmail`),
+    connectGoogleUrl: (scopes: string[]) =>
+      authedUrl(`${API_URL}/api/auth/google/connect${qs({ scopes: scopes.join(",") })}`),
     impersonate: (userId: string) => post<{ token: string }>(`/api/auth/impersonate/${encodeURIComponent(userId)}`),
     stopImpersonate: () => post<{ token: string }>("/api/auth/impersonate/stop"),
+  },
+  settings: {
+    connections: () => get<{ connections: Connection[] }>("/api/auth/connections"),
+    disconnect: (provider: string) => post<void>(`/api/auth/connections/${encodeURIComponent(provider)}/disconnect`),
+  },
+  push: {
+    register: (b: { platform: string; token: string }) => post<void>("/api/push/register", b),
   },
   me: Object.assign(() => get<Me>("/api/me"), {
     update: (b: { locale?: string; timezone?: string }) => patch<Me>("/api/me", b),

@@ -161,28 +161,42 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     return RedirectResponse(f"{get_settings().frontend_url}/oauth/callback#token={out['token']}&next={nxt}")
 
 
-_GMAIL_SCOPE = google.BASE_SCOPES + " https://www.googleapis.com/auth/gmail.send"
+_GOOGLE_SCOPE_URIS = {
+    "gmail.send": "https://www.googleapis.com/auth/gmail.send",
+    "calendar": "https://www.googleapis.com/auth/calendar",
+}
+_CONNECT_CALLBACK_PATH = "/api/auth/google/connect-callback"
 
 
-@router.get("/google/connect-gmail")
-def google_connect_gmail(identity: Identity = Depends(current_identity)):
+@router.get("/google/connect")
+def google_connect(scopes: str, identity: Identity = Depends(current_identity)):
     """Incremental consent: an already-logged-in user escalates their existing Google identity to
-    also grant gmail.send, kept as a separate flow from /google/start because it has a different
-    precondition (an existing session, not none) and a different post-action (persist tokens and
-    return to settings, not mint a session)."""
+    also grant additional scopes (gmail.send, calendar, ...), kept as a separate flow from
+    /google/start because it has a different precondition (an existing session, not none) and a
+    different post-action (persist tokens and return to settings, not mint a session).
+    `scopes` is a comma-separated list of keys from `_GOOGLE_SCOPE_URIS`, e.g. "gmail.send,calendar"."""
     if not google.enabled():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "google login not configured")
+    keys = [s for s in scopes.split(",") if s]
+    unknown = [s for s in keys if s not in _GOOGLE_SCOPE_URIS]
+    if unknown:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unknown scope(s): {', '.join(unknown)}")
+    scope = " ".join([google.BASE_SCOPES, *[_GOOGLE_SCOPE_URIS[k] for k in keys]])
     state = secrets.token_urlsafe(24)
-    sync_redis().setex(f"oauth:gmail_connect:{state}", 600, identity.user.id)
-    return RedirectResponse(google.authorization_url(state, scope=_GMAIL_SCOPE, offline=True))
+    sync_redis().setex(f"oauth:google_connect:{state}", 600, f"{identity.user.id}:{scopes}")
+    return RedirectResponse(google.authorization_url(state, scope=scope, offline=True,
+                                                       callback_path=_CONNECT_CALLBACK_PATH))
 
 
-@router.get("/google/gmail-callback")
-def google_gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
-    user_id = sync_redis().getdel(f"oauth:gmail_connect:{state}")
-    if user_id is None:
+@router.get("/google/connect-callback")
+def google_connect_callback(code: str, state: str, db: Session = Depends(get_db)):
+    raw = sync_redis().getdel(f"oauth:google_connect:{state}")
+    if raw is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "bad state")
-    token, info = google.exchange(code, scope=_GMAIL_SCOPE)
+    user_id, scopes = raw.split(":", 1)
+    keys = [s for s in scopes.split(",") if s]
+    scope = " ".join([google.BASE_SCOPES, *[_GOOGLE_SCOPE_URIS[k] for k in keys]])
+    token, info = google.exchange(code, scope=scope, callback_path=_CONNECT_CALLBACK_PATH)
     sub = info.get("sub")
     ident = db.query(OAuthIdentity).filter_by(provider="google", provider_sub=sub).first()
     if ident is None or ident.user_id != user_id:
@@ -191,8 +205,41 @@ def google_gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     if token.get("refresh_token"):  # Google omits this on re-consent unless prompt=consent forced it
         ident.refresh_token_enc = encrypt(token["refresh_token"])
     ident.expires_at = utcnow() + timedelta(seconds=token.get("expires_in", 3600))
-    ident.scopes = sorted(set(ident.scopes) | {"gmail.send"})
-    return RedirectResponse(f"{get_settings().frontend_url}/settings?gmail=connected")
+    ident.scopes = sorted(set(ident.scopes) | set(keys))
+    return RedirectResponse(f"{get_settings().frontend_url}/settings?connected={scopes}")
+
+
+# ---------------------------------------------------------------- connections
+
+
+@router.get("/connections")
+def list_connections(identity: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    rows = db.query(OAuthIdentity).filter_by(user_id=identity.user.id).all()
+    return {"connections": [
+        {
+            "provider": r.provider,
+            "email": r.email,
+            "scopes": r.scopes,
+            "connected_at": r.created_at.isoformat(),
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+        }
+        for r in rows
+    ]}
+
+
+@router.post("/connections/{provider}/disconnect", status_code=204)
+def disconnect_connection(provider: str, identity: Identity = Depends(current_identity),
+                           db: Session = Depends(get_db)):
+    ident = db.query(OAuthIdentity).filter_by(user_id=identity.user.id, provider=provider).first()
+    if ident is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not connected")
+    ident.access_token_enc = None
+    ident.refresh_token_enc = None
+    ident.expires_at = None
+    ident.scopes = [s for s in ident.scopes if s in ("openid", "email", "profile")]
+    emit(db, "user.connection.disconnected", user_id=identity.user.id, actor=("user", identity.user.id),
+         payload={"provider": provider})
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------- impersonation

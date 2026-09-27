@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mainforte</string>
+    <string name="title_activity_main">Mainforte</string>
+    <string name="package_name">ai.beactive.mainforte</string>
+    <string name="custom_url_scheme">ai.beactive.mainforte</string>
+</resources>

@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     meeting_bot_base_url: str | None = Field(None, alias="MEETING_BOT_BASE_URL")
     meeting_bot_api_key: str | None = Field(None, alias="MEETING_BOT_API_KEY")
 
+    # Push notifications (P5): FCM covers Android directly and iOS via FCM's own APNs bridge, so
+    # one integration (a service-account key, not a legacy server key) covers both platforms
+    # instead of standing up FCM + direct APNs separately.
+    fcm_project_id: str | None = Field(None, alias="FCM_PROJECT_ID")
+    fcm_service_account_json: str | None = Field(None, alias="FCM_SERVICE_ACCOUNT_JSON")
+
     # Worker-pool reconciler (PLAN.md §1.8): api-server -> SSH through backbone's bastion
     # (jump host) -> Jenkins CLI `build <job> -p K=V` -> Jenkins job runs deploy-worker.sh on
     # a node. Mirrors backbone's own jenkins_manager.py / ActiveClaw's lib/jenkins.ts pattern.

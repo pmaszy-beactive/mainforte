@@ -7,6 +7,7 @@ import { Logo } from "@/components/ui/Logo";
 import { WidgetsSection } from "./rail/WidgetsSection";
 import { StaffSection } from "./rail/StaffSection";
 import { ProfileBlock } from "./rail/ProfileBlock";
+import { LanguageSelect } from "./rail/LanguageSelect";
 
 export function Rail() {
   const { t } = useTranslation();
@@ -25,15 +26,21 @@ export function Rail() {
           <Logo compact={collapsed} />
         </Link>
         {!collapsed && (
-          <button onClick={toggle} className="rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.collapse")}>
-            <PanelLeftClose className="size-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <LanguageSelect collapsed={collapsed} />
+            <button onClick={toggle} className="rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.collapse")}>
+              <PanelLeftClose className="size-4" />
+            </button>
+          </div>
         )}
       </div>
       {collapsed && (
-        <button onClick={toggle} className="mx-auto mt-2 rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.expand")}>
-          <PanelLeftOpen className="size-4" />
-        </button>
+        <div className="mx-auto mt-2 flex flex-col items-center gap-1">
+          <button onClick={toggle} className="rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.expand")}>
+            <PanelLeftOpen className="size-4" />
+          </button>
+          <LanguageSelect collapsed={collapsed} />
+        </div>
       )}
       <div className="flex-1 space-y-5 overflow-y-auto px-2 py-3">
         <WidgetsSection collapsed={collapsed} />

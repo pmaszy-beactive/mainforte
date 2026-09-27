@@ -237,11 +237,20 @@
     "language": "Language",
     "timezone": "Timezone",
     "workspaces": "Workspaces",
-    "gmail": {
-      "title": "Gmail",
-      "subtitle": "Let your staff send email from your Gmail account.",
-      "connect": "Connect Gmail",
-      "connected": "Connected"
+    "connections": {
+      "title": "Connections",
+      "subtitle": "Let your staff act on your behalf through these accounts.",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connected": "Connected",
+      "scopes": {
+        "gmail.send": "Send email",
+        "calendar": "Calendar"
+      },
+      "google": {
+        "name": "Google",
+        "subtitle": "Gmail send and Calendar access."
+      }
     }
   },
   "billing": {
