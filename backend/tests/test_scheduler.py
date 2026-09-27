@@ -40,6 +40,26 @@ def test_tick_runs_only_due_entries(monkeypatch):
     assert sched._last_run_at["not-due"] == just_now  # untouched: not due, no run recorded
 
 
+def test_tick_normalizes_plain_number_schedule(monkeypatch):
+    """Regression: celery_app.py's beat_schedule uses plain floats (e.g. `"schedule": 30.0`) for
+    most entries, not celery_schedule(...) objects -- Celery only wraps those internally inside its
+    own beat service, which this in-process scheduler bypasses. A raw float has no
+    `.remaining_estimate`, so `_tick` must normalize it itself instead of assuming it's already a
+    BaseSchedule."""
+    calls = []
+    _patch_beat_schedule(
+        monkeypatch,
+        entries={"due-now": {"task": "t.due", "schedule": 30.0}},
+        tasks={"t.due": lambda: calls.append("due")},
+    )
+    sched = InProcessScheduler()
+    sched._last_run_at = {"due-now": datetime.now(timezone.utc) - timedelta(hours=1)}
+
+    sched._tick()  # must not raise (AttributeError: 'float' object has no attribute 'remaining_estimate')
+
+    assert calls == ["due"]
+
+
 def test_unknown_task_path_logs_and_does_not_raise(monkeypatch):
     _patch_beat_schedule(
         monkeypatch,
