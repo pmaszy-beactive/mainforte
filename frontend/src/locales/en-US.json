@@ -361,7 +361,11 @@
       "currentJob": "Current job",
       "desired": "Desired count",
       "live": "Live",
-      "empty": "No workers."
+      "empty": "No workers.",
+      "sandboxDesired": "Sandbox pool desired count",
+      "fullPool": "Full pool (chat, work, system)",
+      "sandboxPool": "Sandbox pool (work only)",
+      "notConfigured": "Worker auto-scaling is not configured (missing Jenkins/bastion settings) — desired counts are saved but will not provision or destroy workers."
     },
     "events": {
       "time": "Time",

@@ -156,10 +156,21 @@ class DesiredIn(BaseModel):
 
 @router.get("/workers")
 def workers(db: Session = Depends(get_db)):
-    desired = db.get(Setting, "workers.desired")
+    from mainforte.config import get_settings
+    from mainforte.jenkins_ssh import _is_configured
+    from mainforte.tasks.system import AGENT_WORKER_POOLS
+
     stale = utcnow() - timedelta(seconds=90)
     rows = db.query(AgentWorker).order_by(AgentWorker.created_at.asc()).all()
-    return {"desired": (desired.value.get("count") if desired else 1),
+    pools = {}
+    for pool, cfg in AGENT_WORKER_POOLS.items():
+        desired_row = db.get(Setting, cfg["desired_key"])
+        default_desired = 1 if pool == "full" else 0
+        pools[pool] = desired_row.value.get("count", default_desired) if desired_row else default_desired
+
+    return {"desired": pools["full"],  # back-compat: existing UI reads this as the default pool's count
+            "pools": pools,
+            "reconciler_configured": _is_configured(get_settings()),
             "workers": [{"id": w.id, "status": ("offline" if (w.last_heartbeat or stale) <= stale and w.status == "online" else w.status),
                          "node": w.node, "container_name": w.container_name,
                          "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
@@ -168,13 +179,22 @@ def workers(db: Session = Depends(get_db)):
 
 @router.post("/workers/desired")
 def set_desired(body: DesiredIn, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
-    row = db.get(Setting, "workers.desired")
+    return _set_pool_desired(db, "workers.desired", body.count, ident)
+
+
+@router.post("/workers/desired/sandbox")
+def set_desired_sandbox(body: DesiredIn, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
+    return _set_pool_desired(db, "workers.desired.sandbox", body.count, ident)
+
+
+def _set_pool_desired(db: Session, setting_key: str, count: int, ident: Identity) -> dict:
+    row = db.get(Setting, setting_key)
     if row:
-        row.value = {"count": body.count, "by": ident.real_user.email}
+        row.value = {"count": count, "by": ident.real_user.email}
     else:
-        db.add(Setting(key="workers.desired", value={"count": body.count, "by": ident.real_user.email}))
-    # P4: a system-queue job converges live count → desired via Jenkins up/down jobs.
-    return {"desired": body.count}
+        db.add(Setting(key=setting_key, value={"count": count, "by": ident.real_user.email}))
+    # reconcile_agent_workers (tasks/system.py, beat every 60s) converges live count → desired via Jenkins up/down jobs.
+    return {"desired": count}
 
 
 @router.get("/events")

@@ -361,7 +361,11 @@
       "currentJob": "Tâche en cours",
       "desired": "Nombre souhaité",
       "live": "En ligne",
-      "empty": "Aucun travailleur."
+      "empty": "Aucun travailleur.",
+      "sandboxDesired": "Nombre souhaité (bassin sandbox)",
+      "fullPool": "Bassin complet (chat, work, system)",
+      "sandboxPool": "Bassin sandbox (work seulement)",
+      "notConfigured": "La mise à l'échelle automatique des travailleurs n'est pas configurée (paramètres Jenkins/bastion manquants) — les nombres souhaités sont enregistrés mais ne provisionneront ni ne détruiront de travailleurs."
     },
     "events": {
       "time": "Heure",

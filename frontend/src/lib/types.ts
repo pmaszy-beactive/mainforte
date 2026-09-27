@@ -157,7 +157,9 @@ export interface AdminJobs {
 }
 export interface AdminWorkers {
   desired: number;
-  workers: { id: string; status: string; node: string; last_heartbeat: string; current_job: string | null }[];
+  pools: { full: number; sandbox: number };
+  reconciler_configured: boolean;
+  workers: { id: string; status: string; node: string; container_name: string; last_heartbeat: string; current_job: string | null }[];
 }
 export interface AdminTaskSummary {
   id: string;
