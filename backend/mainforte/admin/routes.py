@@ -23,6 +23,7 @@ from mainforte.db.models import (
     Workspace,
 )
 from mainforte.db.session import get_db
+from mainforte.db_settings import BASTION_JENKINS_FIELDS, bastion_jenkins_status, set_bastion_jenkins_config
 from mainforte.events.bus import to_dict
 from mainforte.events.types import EVENT_TYPES
 
@@ -156,7 +157,7 @@ class DesiredIn(BaseModel):
 
 @router.get("/workers")
 def workers(db: Session = Depends(get_db)):
-    from mainforte.config import get_settings
+    from mainforte.db_settings import get_bastion_jenkins_config
     from mainforte.jenkins_ssh import _is_configured
     from mainforte.tasks.system import AGENT_WORKER_POOLS
 
@@ -170,7 +171,7 @@ def workers(db: Session = Depends(get_db)):
 
     return {"desired": pools["full"],  # back-compat: existing UI reads this as the default pool's count
             "pools": pools,
-            "reconciler_configured": _is_configured(get_settings()),
+            "reconciler_configured": _is_configured(get_bastion_jenkins_config(db)),
             "workers": [{"id": w.id, "status": ("offline" if (w.last_heartbeat or stale) <= stale and w.status == "online" else w.status),
                          "node": w.node, "container_name": w.container_name,
                          "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
@@ -216,3 +217,36 @@ def events(type: str | None = None, workspace_id: str | None = None, user_id: st
 @router.get("/event-types")
 def event_types():
     return {"types": EVENT_TYPES}
+
+
+# attr (config.py-style field name, used by the frontend) -> Setting key
+_BASTION_JENKINS_ATTR_TO_KEY = {attr: setting_key for setting_key, (attr, _) in BASTION_JENKINS_FIELDS.items()}
+
+
+class BastionJenkinsSettingsIn(BaseModel):
+    bastion_host: str | None = None
+    bastion_port: int | None = None
+    bastion_username: str | None = None
+    bastion_ssh_key: str | None = None  # PEM text; omitted/blank keeps the existing stored key
+    jenkins_host: str | None = None
+    jenkins_port: int | None = None
+    jenkins_username: str | None = None
+    jenkins_ssh_key: str | None = None  # PEM text; omitted/blank keeps the existing stored key
+    jenkins_provision_job: str | None = None
+    jenkins_destroy_job: str | None = None
+
+
+@router.get("/settings/bastion-jenkins")
+def get_bastion_jenkins_settings(db: Session = Depends(get_db)):
+    return bastion_jenkins_status(db)
+
+
+@router.put("/settings/bastion-jenkins")
+def put_bastion_jenkins_settings(body: BastionJenkinsSettingsIn, db: Session = Depends(get_db)):
+    updates = {
+        _BASTION_JENKINS_ATTR_TO_KEY[attr]: value
+        for attr, value in body.model_dump().items()
+        if value is not None
+    }
+    set_bastion_jenkins_config(db, updates)
+    return bastion_jenkins_status(db)

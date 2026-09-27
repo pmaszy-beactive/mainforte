@@ -16,6 +16,7 @@ const ChatPage = lazy(() => import("@/features/chat/ChatPage"));
 const SettingsPage = lazy(() => import("@/features/settings/SettingsPage"));
 const BillingPage = lazy(() => import("@/features/billing/BillingPage"));
 const AdminLayout = lazy(() => import("@/features/admin/AdminLayout"));
+const SettingsTab = lazy(() => import("@/features/admin/tabs/SettingsTab"));
 const UsersTab = lazy(() => import("@/features/admin/tabs/UsersTab"));
 const FinancesTab = lazy(() => import("@/features/admin/tabs/FinancesTab"));
 const ErrorsTab = lazy(() => import("@/features/admin/tabs/ErrorsTab"));
@@ -54,7 +55,8 @@ export const router = createBrowserRouter([
                 path: "/admin",
                 element: <AdminLayout />,
                 children: [
-                  { index: true, element: <Navigate to="users" replace /> },
+                  { index: true, element: <Navigate to="settings" replace /> },
+                  { path: "settings", element: <SettingsTab /> },
                   { path: "users", element: <UsersTab /> },
                   { path: "finances", element: <FinancesTab /> },
                   { path: "errors", element: <ErrorsTab /> },

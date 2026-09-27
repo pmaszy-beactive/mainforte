@@ -6,7 +6,7 @@ import { Logo } from "@/components/ui/Logo";
 import { FullPageSpinner } from "@/components/ui/Spinner";
 import { cn } from "@/lib/cn";
 
-const tabs = ["users", "finances", "errors", "jobs", "tasks", "workers", "events"] as const;
+const tabs = ["settings", "users", "finances", "errors", "jobs", "tasks", "workers", "events"] as const;
 
 export default function AdminLayout() {
   const { t } = useTranslation();

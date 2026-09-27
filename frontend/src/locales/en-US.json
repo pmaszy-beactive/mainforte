@@ -291,6 +291,7 @@
     "badge": "Admin",
     "backToApp": "Back to app",
     "tabs": {
+      "settings": "Settings",
       "users": "Users",
       "finances": "Finances",
       "errors": "API Errors",
@@ -298,6 +299,25 @@
       "tasks": "Tasks",
       "workers": "Workers",
       "events": "Events"
+    },
+    "settings": {
+      "bastionJenkins": {
+        "title": "Bastion & Jenkins",
+        "description": "Used to auto-scale agent workers via SSH-through-bastion Jenkins CLI triggers.",
+        "bastionHost": "Bastion host",
+        "bastionPort": "Bastion port",
+        "bastionUsername": "Bastion username",
+        "bastionSshKey": "Bastion SSH key",
+        "jenkinsHost": "Jenkins host",
+        "jenkinsPort": "Jenkins port",
+        "jenkinsUsername": "Jenkins username",
+        "jenkinsSshKey": "Jenkins SSH key",
+        "provisionJob": "Provision job name",
+        "destroyJob": "Destroy job name",
+        "keyAlreadySet": "A key is already set — paste a new one to replace it.",
+        "keyNotSet": "No key set yet — paste a PEM-format private key.",
+        "keyHint": "Leave blank to keep the currently stored key."
+      }
     },
     "users": {
       "email": "Email",

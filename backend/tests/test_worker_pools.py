@@ -56,7 +56,7 @@ def test_sandbox_pool_provision_sends_celery_queues():
 
     assert result["action"] == "provision"
     assert trigger.call_count == 1
-    _, params = trigger.call_args[0]
+    _, _, params = trigger.call_args[0]
     assert params["CELERY_QUEUES"] == "work"
 
 
@@ -71,5 +71,5 @@ def test_full_pool_provision_omits_celery_queues():
 
     assert result["action"] == "provision"
     assert trigger.call_count == 1
-    _, params = trigger.call_args[0]
+    _, _, params = trigger.call_args[0]
     assert "CELERY_QUEUES" not in params

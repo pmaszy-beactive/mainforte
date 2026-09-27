@@ -1,5 +1,6 @@
 import { getToken, useAuth } from "@/stores/auth";
 import type {
+  AdminBastionJenkinsSettings,
   AdminError,
   AdminFinances,
   AdminJobs,
@@ -77,6 +78,7 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
 const get = <T>(path: string, query?: Query) => request<T>("GET", path, undefined, query);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {});
 const patch = <T>(path: string, body: unknown) => request<T>("PATCH", path, body);
+const put = <T>(path: string, body: unknown) => request<T>("PUT", path, body);
 
 /** True when a failed request should be retried (network, 5xx, 408, 429). */
 export function isRetryable(e: unknown): boolean {
@@ -177,5 +179,8 @@ export const api = {
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
+    bastionJenkinsSettings: () => get<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins"),
+    setBastionJenkinsSettings: (b: Partial<Record<keyof AdminBastionJenkinsSettings, string | number | null>>) =>
+      put<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins", b),
   },
 };
