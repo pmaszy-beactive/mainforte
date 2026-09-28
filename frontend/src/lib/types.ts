@@ -155,6 +155,11 @@ export interface AdminJobs {
   queues: { name: string; depth: number }[];
   running: { id: string; name: string; queue: string; started_at: string; workspace_id: string | null }[];
 }
+/** GET /api/admin/scheduled-jobs — read straight off celery_app.py's beat_schedule, so this can
+ * never drift from the real config. Distinct from AdminJobs.running, which is a live queue snapshot. */
+export interface AdminScheduledJobs {
+  jobs: { name: string; task: string; schedule: string; queue: string | null }[];
+}
 export interface AdminWorkers {
   desired: number;
   pools: { full: number; sandbox: number };
@@ -190,6 +195,43 @@ export interface AdminTasks {
 export interface AdminTaskDetail {
   task: AdminTaskSummary & { plan: unknown[]; result: unknown; correlation_id: string | null; thread_id: string | null };
   events: WsEvent[];
+}
+/** GET /api/admin/work/{correlation_id} — one unit of deferred work's full event trail. For a chat
+ * turn, `debug` carries each LLM round-trip's full request/response. Generic over correlation_id
+ * (see admin/routes.py docstring) — this is also what the Work Log tab opens per row. */
+export interface AdminChatTurnDebugEvent extends WsEvent<{
+  thread_id: string | null;
+  persona_id: string;
+  model: string | null;
+  fallback: boolean;
+  request: { system: string | null; messages: unknown[]; tools_count: number };
+  response: { text: string; tool_use: { id: string; name: string; input: unknown }[]; stop_reason: string | null; usage: Record<string, number> };
+}> {}
+export type AdminWorkStatus = "error" | "canceled" | "ended" | "in_flight" | "stalled";
+export interface AdminWorkItemDetail {
+  correlation_id: string;
+  ws_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  status: AdminWorkStatus;
+  rounds: number;
+  debug: AdminChatTurnDebugEvent[];
+  events: WsEvent[];
+}
+/** GET /api/admin/work-log — every deferred unit of work (chat turn, Stripe reconcile, agent-worker
+ * dispatch, browser session, build...), one row per base correlation_id. Row click opens
+ * AdminWorkItemDetail via api.admin.workItemDetail(correlation_id). */
+export interface AdminWorkLogItem {
+  correlation_id: string;
+  kind: string;
+  ws_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  event_count: number;
+  status: AdminWorkStatus;
+}
+export interface AdminWorkLog {
+  items: AdminWorkLogItem[];
 }
 /** GET/PUT /api/admin/settings/bastion-jenkins response shape: secret fields (the two SSH keys) are
  * masked to a boolean (whether a value is currently set), never the plaintext or ciphertext. */
@@ -243,4 +285,89 @@ export interface BillingState {
   plans: BillingPlan[];
   subscription: BillingSubscription | null;
   has_card: boolean;
+}
+
+/* Marketplace (v1, conceptual demo — IDEA.md:103) */
+export type ListingKind = "good" | "service";
+export type ListingCondition = "new" | "like_new" | "good" | "fair" | "worn";
+export type ListingStatus = "draft" | "active" | "sold" | "removed";
+export type ListingCategory =
+  | "general"
+  | "electronics"
+  | "furniture"
+  | "clothing"
+  | "kids_baby"
+  | "tools"
+  | "sports_outdoors"
+  | "books_media"
+  | "home_garden"
+  | "tickets_events"
+  | "services_lessons"
+  | "services_home"
+  | "services_other"
+  | "free";
+
+export interface MarketplaceListingPhoto {
+  id: string;
+  upload_id: string;
+  sort_order: number;
+}
+
+export interface MarketplaceListing {
+  id: string;
+  seller_user_id: string;
+  kind: ListingKind;
+  title: string;
+  description: string;
+  category: ListingCategory;
+  condition: ListingCondition | null;
+  price_cents: number;
+  currency: string;
+  location_label: string | null;
+  lat: number | null;
+  lng: number | null;
+  status: ListingStatus;
+  flagged: boolean;
+  report_count: number;
+  photos: MarketplaceListingPhoto[];
+  created_at: string;
+  updated_at: string;
+  /** Present only on radius-filtered search/browse results. */
+  distance_km?: number;
+}
+
+export interface MarketplaceListingIn {
+  kind: ListingKind;
+  title: string;
+  description?: string;
+  category: ListingCategory;
+  condition?: ListingCondition | null;
+  price_cents: number;
+  currency?: string;
+  location_label?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  /** Recorded on the listing for event-log bookkeeping only (not an access boundary) — also the
+   * workspace whose upload endpoint listing photos are stored under. */
+  ws_id?: string | null;
+}
+
+export type MarketplacePaymentMethod = "cash" | "stripe_escrow";
+export type MarketplaceEscrowStatus = "none" | "held" | "released" | "refunded" | "disputed";
+export type MarketplaceOrderStatus = "pending" | "completed" | "canceled" | "disputed";
+
+export interface MarketplaceOrder {
+  id: string;
+  listing_id: string;
+  buyer_user_id: string;
+  seller_user_id: string;
+  amount_cents: number;
+  application_fee_cents: number;
+  currency: string;
+  payment_method: MarketplacePaymentMethod;
+  escrow_status: MarketplaceEscrowStatus;
+  status: MarketplaceOrderStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }

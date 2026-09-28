@@ -4,16 +4,22 @@ import type {
   AdminError,
   AdminFinances,
   AdminJobs,
+  AdminScheduledJobs,
   AdminTaskDetail,
   AdminTasks,
   AdminUser,
   AdminWorkers,
+  AdminWorkItemDetail,
+  AdminWorkLog,
   AuthResponse,
   BillingState,
   BillingSubscription,
   ChatPostResponse,
   Connection,
   Me,
+  MarketplaceListing,
+  MarketplaceListingIn,
+  MarketplaceOrder,
   Task,
   Widget,
   Workspace,
@@ -166,11 +172,53 @@ export const api = {
       post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/subscribe`, b),
     cancel: (wsId: string) => post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/cancel`),
   },
+  marketplace: {
+    listings: (q?: {
+      kind?: string;
+      category?: string;
+      min_price_cents?: number;
+      max_price_cents?: number;
+      q?: string;
+      lat?: number;
+      lng?: number;
+      radius_km?: number;
+      limit?: number;
+    }) => get<{ listings: MarketplaceListing[] }>("/api/marketplace/listings", q),
+    search: (b: {
+      query?: string;
+      category?: string | null;
+      min_price_cents?: number | null;
+      max_price_cents?: number | null;
+      kind?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+      radius_km?: number | null;
+    }) => post<{ listings: MarketplaceListing[] }>("/api/marketplace/search", b),
+    get: (id: string) => get<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}`),
+    mine: () => get<{ listings: MarketplaceListing[] }>("/api/marketplace/mine"),
+    create: (b: MarketplaceListingIn) => post<MarketplaceListing>("/api/marketplace/listings", b),
+    update: (id: string, b: Partial<MarketplaceListingIn> & { photo_upload_ids?: string[] }) =>
+      patch<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}`, b),
+    publish: (id: string) => post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/publish`),
+    remove: (id: string) => post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/remove`),
+    report: (id: string, reason?: string) =>
+      post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/report`, { reason }),
+    placeOrder: (listingId: string, b: { payment_method: string; notes?: string | null }) =>
+      post<MarketplaceOrder>(`/api/marketplace/listings/${encodeURIComponent(listingId)}/orders`, b),
+    myOrders: () => get<{ orders: MarketplaceOrder[] }>("/api/marketplace/orders/mine"),
+    getOrder: (id: string) => get<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}`),
+    releaseEscrow: (id: string) => post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/escrow/release`),
+    refundEscrow: (id: string) => post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/escrow/refund`),
+    disputeOrder: (id: string, reason?: string) =>
+      post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/dispute`, { reason }),
+  },
   admin: {
     users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),
     finances: () => get<AdminFinances>("/api/admin/finances"),
     errors: (limit = 100) => get<{ errors: AdminError[] }>("/api/admin/errors", { limit }),
     jobs: () => get<AdminJobs>("/api/admin/jobs"),
+    scheduledJobs: () => get<AdminScheduledJobs>("/api/admin/scheduled-jobs"),
+    runScheduledJob: (name: string) => post<{ queued: boolean; task: string; task_id: string }>(`/api/admin/scheduled-jobs/${encodeURIComponent(name)}/run`),
     tasks: (q?: { status?: string; workspace_id?: string; limit?: number }) =>
       get<AdminTasks>("/api/admin/tasks", q),
     taskDetail: (id: string) => get<AdminTaskDetail>(`/api/admin/tasks/${encodeURIComponent(id)}`),
@@ -179,6 +227,9 @@ export const api = {
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
+    workLog: () => get<AdminWorkLog>("/api/admin/work-log"),
+    workItemDetail: (correlationId: string) =>
+      get<AdminWorkItemDetail>(`/api/admin/work/${encodeURIComponent(correlationId)}`),
     bastionJenkinsSettings: () => get<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins"),
     setBastionJenkinsSettings: (b: Partial<Record<keyof AdminBastionJenkinsSettings, string | number | null>>) =>
       put<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins", b),

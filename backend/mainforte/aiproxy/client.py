@@ -11,6 +11,13 @@ Admin app/key provisioning lives at `<base>/ai/admin/apps...` (a separate standa
 the dashboard's session-authenticated `/api/ai-proxy/apps...`) and is the one bearer-token,
 no-session admin API meant for machine callers like this one. See
 deploy/ai-proxy/CLIENT_API_DOCS.md, "Admin Billing API".
+
+All mainforte workspaces share ONE proxy app (slug `mainforte`, see `MAINFORTE_APP_SLUG`) with one
+key minted per workspace under it — this is the documented intended shape (CLIENT_API_DOCS.md:
+"API keys support custom JSONB metadata... Use metadata to tag keys for billing attribution"), not
+a per-workspace app. Keeps backbone's app list from growing one row per workspace forever; per-
+workspace billing attribution instead comes from each key's own name/metadata (`ws_id`) and from
+filtering `GET /admin/usage/{app_id}?key_id=...` or `?metadata_key=ws_id&metadata_value=...`.
 """
 from __future__ import annotations
 
@@ -83,17 +90,33 @@ def ensure_app(*, app_slug: str, name: str) -> str:
         return r.json()["id"]
 
 
-def mint_key(*, app_id: str, name: str) -> MintedKey:
+def mint_key(*, app_id: str, name: str, metadata: dict[str, Any] | None = None) -> MintedKey:
+    body: dict[str, Any] = {"name": name}
+    if metadata:
+        body["metadata"] = metadata
     with httpx.Client(base_url=_ai_root(), timeout=15) as c:
-        r = c.post(f"/admin/apps/{app_id}/keys", headers=_admin_headers(), json={"name": name})
+        r = c.post(f"/admin/apps/{app_id}/keys", headers=_admin_headers(), json=body)
         r.raise_for_status()
         d = r.json()
         return MintedKey(key=d["key"], key_id=d["id"], prefix=d.get("prefix", d["key"][:12]))
 
 
+# Single shared backbone app for every mainforte workspace (see module docstring). One row in
+# backbone's app list, forever — not one per workspace.
+MAINFORTE_APP_SLUG = "mainforte"
+
+
+def ensure_mainforte_app() -> str:
+    return ensure_app(app_slug=MAINFORTE_APP_SLUG, name="Mainforte")
+
+
 def mint_workspace_key(*, ws_id: str, ws_name: str) -> MintedKey:
-    app_id = ensure_app(app_slug=f"mainforte-{ws_id}", name=f"mainforte: {ws_name}")
-    return mint_key(app_id=app_id, name="workspace-default")
+    app_id = ensure_mainforte_app()
+    return mint_key(
+        app_id=app_id,
+        name=f"workspace-{ws_id}",
+        metadata={"ws_id": ws_id, "ws_name": ws_name, "provisioned_by": "mainforte"},
+    )
 
 
 # ---------------------------------------------------------------- tenant: chat completions

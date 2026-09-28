@@ -10,7 +10,8 @@
     "loadFailed": "Failed to load",
     "save": "Save",
     "saved": "Saved",
-    "comingSoon": "More settings are coming soon."
+    "comingSoon": "More settings are coming soon.",
+    "cancel": "Cancel"
   },
   "nav": {
     "why": "Why",
@@ -295,8 +296,9 @@
       "users": "Users",
       "finances": "Finances",
       "errors": "API Errors",
-      "jobs": "Jobs",
-      "tasks": "Tasks",
+      "jobs": "Scheduled Jobs",
+      "tasks": "Agent Tasks",
+      "work-log": "Work Log",
       "workers": "Workers",
       "events": "Events"
     },
@@ -356,12 +358,19 @@
     },
     "jobs": {
       "job": "Job",
+      "task": "Task",
+      "schedule": "Schedule",
       "queue": "Queue",
       "workspace": "Workspace",
       "started": "Started",
       "running": "Running",
+      "live": "Live (running right now)",
+      "scheduled": "Scheduled",
+      "runNow": "Run now",
+      "queued": "Queued!",
       "noQueues": "No queues reported.",
-      "empty": "Nothing running."
+      "empty": "Nothing running.",
+      "scheduledEmpty": "No scheduled jobs found."
     },
     "tasks": {
       "status": "Status",
@@ -391,6 +400,22 @@
       "sandboxPool": "Sandbox pool (work only)",
       "notConfigured": "Worker auto-scaling is not configured (missing Jenkins/bastion settings) — desired counts are saved but will not provision or destroy workers."
     },
+    "workLog": {
+      "started": "Started",
+      "kind": "Kind",
+      "workspace": "Workspace",
+      "events": "Events",
+      "ended": "Ended",
+      "status": "Status",
+      "id": "Correlation ID",
+      "detail": "View detail",
+      "empty": "No deferred work recorded yet.",
+      "status_ended": "Ended",
+      "status_error": "Error",
+      "status_canceled": "Canceled",
+      "status_in_flight": "In flight",
+      "status_stalled": "Stalled"
+    },
     "events": {
       "time": "Time",
       "type": "Type",
@@ -399,7 +424,142 @@
       "payload": "Payload",
       "filterType": "Filter by type…",
       "filterWorkspace": "Workspace id…",
-      "empty": "No events."
+      "empty": "No events.",
+      "debug": "Debug",
+      "debugTitle": "Chat turn debug",
+      "debugStatus": "Status",
+      "debugRounds": "LLM round-trips",
+      "debugStarted": "Started",
+      "debugEnded": "Ended",
+      "debugCopy": "Copy JSON",
+      "debugCopied": "Copied!",
+      "debugEmpty": "No debug capture for this correlation id (older event, or not an LLM round-trip).",
+      "debugLoadFailed": "Couldn't load debug data.",
+      "debugRequest": "Request",
+      "debugResponse": "Response",
+      "debugSystem": "System prompt",
+      "debugMessages": "Messages sent",
+      "debugFallback": "Echo fallback (no ai-proxy key/base URL configured)"
+    }
+  },
+  "marketplace": {
+    "title": "Marketplace",
+    "subtitle": "Buy and sell goods and services nearby. Conceptual v1 demo.",
+    "disclaimer": "No illegal, stolen, or hazardous items. Sellers are responsible for complying with local law.",
+    "myListings": "My Listings",
+    "myOrders": "My Orders",
+    "newListing": "New Listing",
+    "search": "Search",
+    "searchPlaceholder": "Try “something for a kid under $50”…",
+    "empty": "No listings found.",
+    "emptyHint": "Try a different search or filter.",
+    "notFound": "Listing not found.",
+    "noDescription": "No description provided.",
+    "distanceAway": "{{km}} km away",
+    "ownListingHint": "This is your own listing.",
+    "soldHint": "This item has already sold.",
+    "flagged": "Flagged",
+    "edit": "Edit",
+    "remove": "Remove",
+    "filters": {
+      "anyKind": "Any type",
+      "anyCategory": "Any category",
+      "anyCondition": "Any condition"
+    },
+    "kind": {
+      "good": "Item",
+      "service": "Service"
+    },
+    "condition": {
+      "new": "New",
+      "like_new": "Like new",
+      "good": "Good",
+      "fair": "Fair",
+      "worn": "Worn"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "sold": "Sold",
+      "removed": "Removed"
+    },
+    "category": {
+      "general": "General",
+      "electronics": "Electronics",
+      "furniture": "Furniture",
+      "clothing": "Clothing",
+      "kids_baby": "Kids & baby",
+      "tools": "Tools",
+      "sports_outdoors": "Sports & outdoors",
+      "books_media": "Books & media",
+      "home_garden": "Home & garden",
+      "tickets_events": "Tickets & events",
+      "services_lessons": "Lessons & tutoring",
+      "services_home": "Home services",
+      "services_other": "Other services",
+      "free": "Free"
+    },
+    "payment": {
+      "cash": "Cash",
+      "cashHint": "Arrange payment directly with the other party.",
+      "escrow": "Escrow (stub)",
+      "escrowHint": "Simulated hold via Stripe Connect — no real charge.",
+      "escrowStubNotice": "This is a stub: no real payment is processed and no Stripe network call is made.",
+      "stripe_escrow": "Escrow (stub)"
+    },
+    "escrowStatus": {
+      "none": "No escrow",
+      "held": "Held",
+      "released": "Released",
+      "refunded": "Refunded",
+      "disputed": "Disputed"
+    },
+    "orderStatus": {
+      "pending": "Pending",
+      "completed": "Completed",
+      "canceled": "Canceled",
+      "disputed": "Disputed"
+    },
+    "buy": {
+      "title": "Buy this listing",
+      "action": "Buy",
+      "confirm": "Place order",
+      "placed": "Order placed.",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "e.g. pickup time, meet-up spot…"
+    },
+    "report": {
+      "title": "Report listing",
+      "action": "Report",
+      "hint": "Flag this listing for review. It stays visible — v1 has no moderation queue.",
+      "reason": "Reason (optional)",
+      "reasonPlaceholder": "What's wrong with this listing?",
+      "submit": "Submit report",
+      "done": "Thanks, this listing has been flagged."
+    },
+    "form": {
+      "newTitle": "New listing",
+      "editTitle": "Edit listing",
+      "titleLabel": "Title",
+      "descriptionLabel": "Description",
+      "categoryLabel": "Category",
+      "conditionLabel": "Condition",
+      "priceLabel": "Price (USD)",
+      "locationLabel": "Location",
+      "locationPlaceholder": "e.g. Brooklyn, NY",
+      "photosLabel": "Photos",
+      "addPhoto": "Add",
+      "saveDraft": "Save draft",
+      "publish": "Publish"
+    },
+    "myListingsEmpty": "You haven't listed anything yet.",
+    "orders": {
+      "buying": "Buying",
+      "selling": "Selling",
+      "empty": "No orders yet.",
+      "release": "Release funds",
+      "refund": "Refund",
+      "dispute": "Dispute"
     }
   }
 }
