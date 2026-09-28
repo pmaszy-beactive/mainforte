@@ -1,7 +1,6 @@
 import { getToken, useAuth } from "@/stores/auth";
 import type {
   AdminBastionJenkinsSettings,
-  AdminChatTurnDetail,
   AdminError,
   AdminFinances,
   AdminJobs,
@@ -10,6 +9,8 @@ import type {
   AdminTasks,
   AdminUser,
   AdminWorkers,
+  AdminWorkItemDetail,
+  AdminWorkLog,
   AuthResponse,
   BillingState,
   BillingSubscription,
@@ -183,8 +184,9 @@ export const api = {
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
-    chatTurnDetail: (correlationId: string) =>
-      get<AdminChatTurnDetail>(`/api/admin/chat-turns/${encodeURIComponent(correlationId)}`),
+    workLog: () => get<AdminWorkLog>("/api/admin/work-log"),
+    workItemDetail: (correlationId: string) =>
+      get<AdminWorkItemDetail>(`/api/admin/work/${encodeURIComponent(correlationId)}`),
     bastionJenkinsSettings: () => get<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins"),
     setBastionJenkinsSettings: (b: Partial<Record<keyof AdminBastionJenkinsSettings, string | number | null>>) =>
       put<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins", b),

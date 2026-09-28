@@ -22,6 +22,7 @@ const FinancesTab = lazy(() => import("@/features/admin/tabs/FinancesTab"));
 const ErrorsTab = lazy(() => import("@/features/admin/tabs/ErrorsTab"));
 const JobsTab = lazy(() => import("@/features/admin/tabs/JobsTab"));
 const TasksTab = lazy(() => import("@/features/admin/tabs/TasksTab"));
+const WorkLogTab = lazy(() => import("@/features/admin/tabs/WorkLogTab"));
 const WorkersTab = lazy(() => import("@/features/admin/tabs/WorkersTab"));
 const EventsTab = lazy(() => import("@/features/admin/tabs/EventsTab"));
 
@@ -62,6 +63,7 @@ export const router = createBrowserRouter([
                   { path: "errors", element: <ErrorsTab /> },
                   { path: "jobs", element: <JobsTab /> },
                   { path: "tasks", element: <TasksTab /> },
+                  { path: "work-log", element: <WorkLogTab /> },
                   { path: "workers", element: <WorkersTab /> },
                   { path: "events", element: <EventsTab /> },
                 ],

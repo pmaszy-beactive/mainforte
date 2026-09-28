@@ -196,8 +196,9 @@ export interface AdminTaskDetail {
   task: AdminTaskSummary & { plan: unknown[]; result: unknown; correlation_id: string | null; thread_id: string | null };
   events: WsEvent[];
 }
-/** GET /api/admin/chat-turns/{correlation_id} — one LLM round-trip's full request/response, paired
- * with the surrounding event trail. Generic over correlation_id (see admin/routes.py docstring). */
+/** GET /api/admin/work/{correlation_id} — one unit of deferred work's full event trail. For a chat
+ * turn, `debug` carries each LLM round-trip's full request/response. Generic over correlation_id
+ * (see admin/routes.py docstring) — this is also what the Work Log tab opens per row. */
 export interface AdminChatTurnDebugEvent extends WsEvent<{
   thread_id: string | null;
   persona_id: string;
@@ -206,15 +207,31 @@ export interface AdminChatTurnDebugEvent extends WsEvent<{
   request: { system: string | null; messages: unknown[]; tools_count: number };
   response: { text: string; tool_use: { id: string; name: string; input: unknown }[]; stop_reason: string | null; usage: Record<string, number> };
 }> {}
-export interface AdminChatTurnDetail {
+export type AdminWorkStatus = "error" | "canceled" | "ended" | "in_flight" | "stalled";
+export interface AdminWorkItemDetail {
   correlation_id: string;
   ws_id: string | null;
   started_at: string | null;
   ended_at: string | null;
-  status: "error" | "canceled" | "ended" | "in_flight";
+  status: AdminWorkStatus;
   rounds: number;
   debug: AdminChatTurnDebugEvent[];
   events: WsEvent[];
+}
+/** GET /api/admin/work-log — every deferred unit of work (chat turn, Stripe reconcile, agent-worker
+ * dispatch, browser session, build...), one row per base correlation_id. Row click opens
+ * AdminWorkItemDetail via api.admin.workItemDetail(correlation_id). */
+export interface AdminWorkLogItem {
+  correlation_id: string;
+  kind: string;
+  ws_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  event_count: number;
+  status: AdminWorkStatus;
+}
+export interface AdminWorkLog {
+  items: AdminWorkLogItem[];
 }
 /** GET/PUT /api/admin/settings/bastion-jenkins response shape: secret fields (the two SSH keys) are
  * masked to a boolean (whether a value is currently set), never the plaintext or ciphertext. */

@@ -297,6 +297,7 @@
       "errors": "Erreurs API",
       "jobs": "Tâches planifiées",
       "tasks": "Tâches d'agent",
+      "work-log": "Registre de travail",
       "workers": "Travailleurs",
       "events": "Événements"
     },
@@ -397,6 +398,22 @@
       "fullPool": "Bassin complet (chat, work, system)",
       "sandboxPool": "Bassin sandbox (work seulement)",
       "notConfigured": "La mise à l'échelle automatique des travailleurs n'est pas configurée (paramètres Jenkins/bastion manquants) — les nombres souhaités sont enregistrés mais ne provisionneront ni ne détruiront de travailleurs."
+    },
+    "workLog": {
+      "started": "Démarré",
+      "kind": "Genre",
+      "workspace": "Espace de travail",
+      "events": "Événements",
+      "ended": "Terminé",
+      "status": "État",
+      "id": "ID de corrélation",
+      "detail": "Voir le détail",
+      "empty": "Aucun travail différé enregistré pour le moment.",
+      "status_ended": "Terminé",
+      "status_error": "Erreur",
+      "status_canceled": "Annulé",
+      "status_in_flight": "En cours",
+      "status_stalled": "Bloqué"
     },
     "events": {
       "time": "Heure",

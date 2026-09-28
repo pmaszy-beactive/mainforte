@@ -105,7 +105,7 @@ def _emit_reply_debug(*, ws_id: str, thread_id: str | None, correlation_id: str,
                        stop_reason: str | None = None, usage: dict[str, int] | None = None,
                        fallback: bool = False) -> None:
     """Durable capture of one LLM round-trip (or the echo fallback in its place) for admin
-    debugging (`GET /api/admin/chat-turns/{correlation_id}`). Emitted via `emit()`, not
+    debugging (`GET /api/admin/work/{correlation_id}`). Emitted via `emit()`, not
     `emit_ephemeral` — unlike `persona.reply.delta`, this must survive to be inspectable after the
     fact. `messages` is stored as sent (already-bounded by MAX_REPLY_TOKENS/model context, so this
     is acceptable JSONB size); `tools` is recorded as a count only, not the full schema, since the
