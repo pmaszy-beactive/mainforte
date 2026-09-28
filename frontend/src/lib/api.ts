@@ -1,9 +1,11 @@
 import { getToken, useAuth } from "@/stores/auth";
 import type {
   AdminBastionJenkinsSettings,
+  AdminChatTurnDetail,
   AdminError,
   AdminFinances,
   AdminJobs,
+  AdminScheduledJobs,
   AdminTaskDetail,
   AdminTasks,
   AdminUser,
@@ -171,6 +173,8 @@ export const api = {
     finances: () => get<AdminFinances>("/api/admin/finances"),
     errors: (limit = 100) => get<{ errors: AdminError[] }>("/api/admin/errors", { limit }),
     jobs: () => get<AdminJobs>("/api/admin/jobs"),
+    scheduledJobs: () => get<AdminScheduledJobs>("/api/admin/scheduled-jobs"),
+    runScheduledJob: (name: string) => post<{ queued: boolean; task: string; task_id: string }>(`/api/admin/scheduled-jobs/${encodeURIComponent(name)}/run`),
     tasks: (q?: { status?: string; workspace_id?: string; limit?: number }) =>
       get<AdminTasks>("/api/admin/tasks", q),
     taskDetail: (id: string) => get<AdminTaskDetail>(`/api/admin/tasks/${encodeURIComponent(id)}`),
@@ -179,6 +183,8 @@ export const api = {
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
+    chatTurnDetail: (correlationId: string) =>
+      get<AdminChatTurnDetail>(`/api/admin/chat-turns/${encodeURIComponent(correlationId)}`),
     bastionJenkinsSettings: () => get<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins"),
     setBastionJenkinsSettings: (b: Partial<Record<keyof AdminBastionJenkinsSettings, string | number | null>>) =>
       put<AdminBastionJenkinsSettings>("/api/admin/settings/bastion-jenkins", b),

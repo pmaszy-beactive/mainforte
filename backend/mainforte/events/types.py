@@ -48,6 +48,7 @@ EVENT_TYPES: dict[str, str] = {
     "persona.help.requested": "Persona asked another persona for help",
     "persona.reply.cancel_requested": "Human asked a persona to stop replying",
     "persona.reply.canceled": "Persona reply was canceled",
+    "persona.reply.debug": "Full LLM request/response captured for one round-trip (admin debugging)",
     # memory
     "memory.noted": "A note was added to workspace or persona memory",
     # governor

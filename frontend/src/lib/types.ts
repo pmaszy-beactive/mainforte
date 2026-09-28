@@ -155,6 +155,11 @@ export interface AdminJobs {
   queues: { name: string; depth: number }[];
   running: { id: string; name: string; queue: string; started_at: string; workspace_id: string | null }[];
 }
+/** GET /api/admin/scheduled-jobs — read straight off celery_app.py's beat_schedule, so this can
+ * never drift from the real config. Distinct from AdminJobs.running, which is a live queue snapshot. */
+export interface AdminScheduledJobs {
+  jobs: { name: string; task: string; schedule: string; queue: string | null }[];
+}
 export interface AdminWorkers {
   desired: number;
   pools: { full: number; sandbox: number };
@@ -189,6 +194,26 @@ export interface AdminTasks {
 }
 export interface AdminTaskDetail {
   task: AdminTaskSummary & { plan: unknown[]; result: unknown; correlation_id: string | null; thread_id: string | null };
+  events: WsEvent[];
+}
+/** GET /api/admin/chat-turns/{correlation_id} — one LLM round-trip's full request/response, paired
+ * with the surrounding event trail. Generic over correlation_id (see admin/routes.py docstring). */
+export interface AdminChatTurnDebugEvent extends WsEvent<{
+  thread_id: string | null;
+  persona_id: string;
+  model: string | null;
+  fallback: boolean;
+  request: { system: string | null; messages: unknown[]; tools_count: number };
+  response: { text: string; tool_use: { id: string; name: string; input: unknown }[]; stop_reason: string | null; usage: Record<string, number> };
+}> {}
+export interface AdminChatTurnDetail {
+  correlation_id: string;
+  ws_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  status: "error" | "canceled" | "ended" | "in_flight";
+  rounds: number;
+  debug: AdminChatTurnDebugEvent[];
   events: WsEvent[];
 }
 /** GET/PUT /api/admin/settings/bastion-jenkins response shape: secret fields (the two SSH keys) are

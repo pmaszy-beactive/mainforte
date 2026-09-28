@@ -98,6 +98,33 @@ def _fallback_text(persona: Persona, user_text: str) -> str:
     )
 
 
+def _emit_reply_debug(*, ws_id: str, thread_id: str | None, correlation_id: str, persona: Persona,
+                       model: str | None, system: str | None, messages: list[dict[str, Any]],
+                       tools: list[dict[str, Any]] | None, text: str,
+                       tool_use: list[aiproxy.ToolUseBlock] | None = None,
+                       stop_reason: str | None = None, usage: dict[str, int] | None = None,
+                       fallback: bool = False) -> None:
+    """Durable capture of one LLM round-trip (or the echo fallback in its place) for admin
+    debugging (`GET /api/admin/chat-turns/{correlation_id}`). Emitted via `emit()`, not
+    `emit_ephemeral` — unlike `persona.reply.delta`, this must survive to be inspectable after the
+    fact. `messages` is stored as sent (already-bounded by MAX_REPLY_TOKENS/model context, so this
+    is acceptable JSONB size); `tools` is recorded as a count only, not the full schema, since the
+    schema is static and available from `tools/catalog.py`."""
+    with db_session() as db:
+        emit(db, "persona.reply.debug", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
+             correlation_id=correlation_id,
+             payload={
+                 "thread_id": thread_id, "persona_id": persona.id, "model": model, "fallback": fallback,
+                 "request": {"system": system, "messages": messages, "tools_count": len(tools or [])},
+                 "response": {
+                     "text": text,
+                     "tool_use": [{"id": tu.id, "name": tu.name, "input": tu.input} for tu in (tool_use or [])],
+                     "stop_reason": stop_reason,
+                     "usage": usage or {},
+                 },
+             })
+
+
 async def _run_one_reply_round(*, api_key: str, system: str, convo: list[dict[str, Any]],
                                 persona: Persona, ws_id: str, thread_id: str | None,
                                 correlation_id: str, usage_sink: dict[str, int]) -> str:
@@ -110,6 +137,7 @@ async def _run_one_reply_round(*, api_key: str, system: str, convo: list[dict[st
     tool_use_sink: list[aiproxy.ToolUseBlock] = []
     stop_reason_sink: dict[str, str] = {}
     text = ""
+    messages_sent = list(convo)
     async for chunk in aiproxy.stream_reply(
         api_key=api_key, model=persona.model, system=system, messages=convo,
         max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
@@ -121,6 +149,10 @@ async def _run_one_reply_round(*, api_key: str, system: str, convo: list[dict[st
     usage_sink["input_tokens"] = usage_sink.get("input_tokens", 0) + round_usage.get("input_tokens", 0)
     usage_sink["output_tokens"] = usage_sink.get("output_tokens", 0) + round_usage.get("output_tokens", 0)
     convo.append({"role": "assistant", "content": text})
+    _emit_reply_debug(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
+                       model=persona.model, system=system, messages=messages_sent, tools=_ALL_TOOLS,
+                       text=text, tool_use=tool_use_sink, stop_reason=stop_reason_sink.get("stop_reason"),
+                       usage=round_usage)
     return text
 
 
@@ -227,6 +259,9 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
     try:
         if api_key is None:
             full = _fallback_text(persona, user_text)
+            _emit_reply_debug(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
+                               model=persona.model, system=system, messages=convo, tools=_ALL_TOOLS,
+                               text=full, fallback=True)
             if _is_canceled(ws_id, thread_id, correlation_id):
                 canceled = True
             else:
@@ -238,6 +273,7 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                 tool_use_sink: list[aiproxy.ToolUseBlock] = []
                 stop_reason_sink: dict[str, str] = {}
                 round_text = ""
+                messages_sent = list(convo)
                 async for chunk in aiproxy.stream_reply(
                     api_key=api_key, model=persona.model, system=system, messages=convo,
                     max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
@@ -252,6 +288,10 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                                   correlation_id=correlation_id, payload={"thread_id": thread_id, "text": chunk})
                 usage_sink["input_tokens"] = usage_sink.get("input_tokens", 0) + round_usage.get("input_tokens", 0)
                 usage_sink["output_tokens"] = usage_sink.get("output_tokens", 0) + round_usage.get("output_tokens", 0)
+                _emit_reply_debug(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
+                                   model=persona.model, system=system, messages=messages_sent, tools=_ALL_TOOLS,
+                                   text=round_text, tool_use=tool_use_sink,
+                                   stop_reason=stop_reason_sink.get("stop_reason"), usage=round_usage)
                 if canceled or not tool_use_sink:
                     break
 

@@ -295,8 +295,8 @@
       "users": "Utilisateurs",
       "finances": "Finances",
       "errors": "Erreurs API",
-      "jobs": "Tâches",
-      "tasks": "Exécutions",
+      "jobs": "Tâches planifiées",
+      "tasks": "Tâches d'agent",
       "workers": "Travailleurs",
       "events": "Événements"
     },
@@ -355,13 +355,20 @@
       "empty": "Aucune erreur. Bravo."
     },
     "jobs": {
-      "job": "Tâche",
+      "job": "Tâche planifiée",
+      "task": "Tâche Celery",
+      "schedule": "Horaire",
       "queue": "File",
       "workspace": "Espace de travail",
       "started": "Démarrée",
       "running": "En cours",
+      "live": "En direct (en cours maintenant)",
+      "scheduled": "Planifiées",
+      "runNow": "Exécuter maintenant",
+      "queued": "Mise en file!",
       "noQueues": "Aucune file signalée.",
-      "empty": "Rien en cours."
+      "empty": "Rien en cours.",
+      "scheduledEmpty": "Aucune tâche planifiée trouvée."
     },
     "tasks": {
       "status": "État",
@@ -399,7 +406,22 @@
       "payload": "Charge utile",
       "filterType": "Filtrer par type…",
       "filterWorkspace": "ID d'espace de travail…",
-      "empty": "Aucun événement."
+      "empty": "Aucun événement.",
+      "debug": "Déboguer",
+      "debugTitle": "Débogage du tour de conversation",
+      "debugStatus": "État",
+      "debugRounds": "Allers-retours LLM",
+      "debugStarted": "Démarré",
+      "debugEnded": "Terminé",
+      "debugCopy": "Copier le JSON",
+      "debugCopied": "Copié!",
+      "debugEmpty": "Aucune capture de débogage pour cet identifiant de corrélation (événement plus ancien, ou pas un aller-retour LLM).",
+      "debugLoadFailed": "Échec du chargement des données de débogage.",
+      "debugRequest": "Requête",
+      "debugResponse": "Réponse",
+      "debugSystem": "Invite système",
+      "debugMessages": "Messages envoyés",
+      "debugFallback": "Repli écho (aucune clé/URL de base ai-proxy configurée)"
     }
   }
 }

@@ -113,6 +113,39 @@ def jobs():
     return {"queues": [{"name": n, "depth": d} for n, d in queue_depths().items()], "running": running}
 
 
+@router.get("/scheduled-jobs")
+def scheduled_jobs():
+    """The real cron/interval jobs — read directly off `celery.conf.beat_schedule` so this view can
+    never drift from what's actually configured (see celery_app.py). Distinct from `/jobs`, which is
+    a live, ephemeral snapshot of whatever happens to be running right now on any queue."""
+    from mainforte.celery_app import celery
+
+    schedule = celery.conf.beat_schedule or {}
+    return {
+        "jobs": [
+            {"name": name, "task": entry["task"], "schedule": str(entry["schedule"]),
+             "queue": (celery.conf.task_routes or {}).get(entry["task"], {}).get("queue")}
+            for name, entry in schedule.items()
+        ]
+    }
+
+
+@router.post("/scheduled-jobs/{name}/run")
+def run_scheduled_job(name: str):
+    """Run-now for a beat_schedule entry: enqueues the same task Celery would fire on schedule, via
+    the real broker (not an in-process call), so it lands on a real worker exactly like the
+    scheduled firing would. Pausing isn't available yet — beat_schedule is static config, and true
+    pause/resume needs a DB-backed enabled flag consulted by a custom scheduler (follow-up)."""
+    from mainforte.celery_app import celery
+
+    schedule = celery.conf.beat_schedule or {}
+    entry = schedule.get(name)
+    if entry is None:
+        raise HTTPException(404, "no such scheduled job")
+    result = celery.send_task(entry["task"])
+    return {"queued": True, "task": entry["task"], "task_id": result.id}
+
+
 def _task_summary(t: Task, ws_name: str | None, persona_name: str | None) -> dict:
     return {"id": t.id, "ws_id": t.ws_id, "ws_name": ws_name, "persona_id": t.persona_id,
             "persona_name": persona_name, "status": t.status, "current_stage": t.current_stage,
@@ -150,6 +183,40 @@ def task_detail(task_id: str, db: Session = Depends(get_db)):
     task_out = _task_summary(t, ws_name, persona_name)
     task_out.update({"plan": t.plan, "result": t.result, "correlation_id": t.correlation_id, "thread_id": t.thread_id})
     return {"task": task_out, "events": [to_dict(e) for e in events]}
+
+
+@router.get("/chat-turns/{correlation_id}")
+def chat_turn_detail(correlation_id: str, db: Session = Depends(get_db)):
+    """Everything captured for one chat turn (or one round of it — see `persona.reply.debug` in
+    events/types.py): the full request (system prompt, message history, tool count) and full
+    response (text, tool_use, stop_reason, usage) for every LLM round-trip, plus the surrounding
+    tool/persona event trail. Same correlation_id-scoped query as `task_detail()` — this endpoint
+    is intentionally generic over correlation_id, not chat-specific, so it doubles as the detail
+    view for any unit of deferred work once correlation_id is known (see plan part B.2)."""
+    events = (
+        db.query(Event)
+        .filter((Event.correlation_id == correlation_id) | (Event.correlation_id.like(f"{correlation_id}:%")))
+        .order_by(Event.id.asc())
+        .all()
+    )
+    if not events:
+        raise HTTPException(404, "no events found for this correlation_id")
+    debug_events = [e for e in events if e.type == "persona.reply.debug"]
+    started = next((e for e in events if e.type in ("persona.reply.started", "chat.message.created")), events[0])
+    ended = next((e for e in reversed(events) if e.type in ("persona.reply.ended", "persona.reply.error",
+                                                              "persona.reply.canceled")), None)
+    error_event = next((e for e in events if e.type in ("persona.reply.error", "tool.error")), None)
+    return {
+        "correlation_id": correlation_id,
+        "ws_id": events[0].ws_id,
+        "started_at": events[0].ts.isoformat() if events[0].ts else None,
+        "ended_at": ended.ts.isoformat() if ended and ended.ts else None,
+        "status": "error" if error_event else ("canceled" if any(e.type == "persona.reply.canceled" for e in events)
+                                                else ("ended" if ended else "in_flight")),
+        "rounds": len(debug_events),
+        "debug": [to_dict(e) for e in debug_events],
+        "events": [to_dict(e) for e in events],
+    }
 
 
 class DesiredIn(BaseModel):
