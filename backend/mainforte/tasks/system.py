@@ -357,11 +357,33 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     return {"ok": True, "live": live, "desired": desired, "action": "destroy", "triggered": n}
 
 
+AGENT_WORKER_PROVISION_GRACE_SECONDS = 300  # deploy-worker.sh's two sequential `docker compose build`
+# calls plus container start comfortably fit inside this; reconcile_agent_workers ticks every 60s,
+# so without this a name with no AgentWorker row yet (build still running, or heartbeat not landed)
+# looks identical to "never provisioned" and gets re-triggered on every single tick -- Jenkins queues
+# a fresh deploy-worker.sh run, which docker stop/rm's whatever the PREVIOUS run just started,
+# forever outrunning any container's ability to boot and heartbeat before it's torn down again.
+
+
+def _recently_provisioned_names(db, prefix: str) -> set[str]:
+    cutoff = utcnow() - timedelta(seconds=AGENT_WORKER_PROVISION_GRACE_SECONDS)
+    rows = (
+        db.query(Event.payload)
+        .filter(Event.type == "worker.provisioning", Event.ts >= cutoff)
+        .all()
+    )
+    return {
+        payload["container_name"]
+        for (payload,) in rows
+        if payload.get("container_name", "").startswith(prefix)
+    }
+
+
 def _provision(db, s, pool: str, cfg: dict, managed: list, to_add: int) -> dict:
     from mainforte.jenkins_ssh import trigger_jenkins_build
 
     prefix = cfg["prefix"]
-    used = {w.container_name for w in managed}
+    used = {w.container_name for w in managed} | _recently_provisioned_names(db, prefix)
     n = 0
     idx = 1
     while n < to_add:
