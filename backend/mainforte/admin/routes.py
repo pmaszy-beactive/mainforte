@@ -18,6 +18,7 @@ from mainforte.db.models import (
     Persona,
     Price,
     Setting,
+    Site,
     Subscription,
     Task,
     User,
@@ -361,6 +362,49 @@ def destroy_worker(worker_id: str, ident: Identity = Depends(require_superuser),
     emit(db, "worker.destroying", ws_id=None, actor=("user", ident.real_user.id),
          payload={"container_name": w.container_name, "pool": "manual", "by": ident.real_user.email})
     return {"ok": True, "container_name": w.container_name}
+
+
+@router.get("/sites")
+def sites(workspace_id: str | None = None, limit: int = Query(200, le=1000), db: Session = Depends(get_db)):
+    """Lists `Site` rows across every workspace — unlike `sites.routes.list_sites`, which is
+    `require_membership`-gated and therefore only ever shows a caller their own workspace's sites.
+    This is the one surface where `last_error` is allowed to reach an API response (see the `Site`
+    model docstring and `sites/service.py`'s module docstring: admin/debug only, never user-facing),
+    plus `container_name`/`dev_port` — the raw infra detail `sites.service.site_out`/`plain_status`
+    deliberately omit."""
+    q = db.query(Site, Workspace.name).join(Workspace, Workspace.id == Site.ws_id)
+    if workspace_id:
+        q = q.filter(Site.ws_id == workspace_id)
+    rows = q.order_by(Site.created_at.desc()).limit(limit).all()
+    return {"sites": [{"id": s.id, "name": s.name, "slug": s.slug, "ws_id": s.ws_id, "workspace_name": ws_name,
+                        "owner_id": s.owner_id, "status": s.status, "stage": s.stage,
+                        "container_name": s.container_name, "dev_port": s.dev_port,
+                        "last_error": s.last_error, "source_version": s.source_version,
+                        "created_at": s.created_at.isoformat(),
+                        "published_at": s.published_at.isoformat() if s.published_at else None}
+                       for s, ws_name in rows]}
+
+
+@router.post("/sites/{site_id}/destroy")
+def destroy_site(site_id: str, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
+    """Force-triggers the site-destroy Jenkins job (tears down the container + drops the per-site
+    Postgres DB/role — see sites/provisioning.py's trigger_destroy) regardless of the site's current
+    status — the admin escape hatch for a site stuck in error/building or one an admin simply
+    wants gone. Mirrors destroy_worker: the row is NOT deleted, only torn down and left at
+    status=destroying for audit/history, matching how AgentWorker rows aren't deleted either.
+    trigger_destroy itself emits `site.destroyed` (actor=system) once the Jenkins job is fired —
+    no separate admin-initiated event type exists for this today (unlike worker.destroying), so
+    who requested it isn't recorded on the event log, only in this route's own access log."""
+    from mainforte.sites.provisioning import trigger_destroy
+
+    site = db.get(Site, site_id)
+    if not site:
+        raise HTTPException(404, "site not found")
+
+    site.status = "destroying"
+    trigger_destroy(db, site=site)
+    db.commit()
+    return {"ok": True, "site_id": site.id, "container_name": site.container_name}
 
 
 def _set_pool_desired(db: Session, pool_field: str, count: int, ident: Identity) -> dict:

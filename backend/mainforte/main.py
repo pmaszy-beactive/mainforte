@@ -61,7 +61,7 @@ async def lifespan(_app: FastAPI):
             scheduler.stop()
 
 
-app = FastAPI(title="Mainforte", version="0.1.47", docs_url="/api/docs", openapi_url="/api/openapi.json",
+app = FastAPI(title="Mainforte", version="0.1.48", docs_url="/api/docs", openapi_url="/api/openapi.json",
               lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
