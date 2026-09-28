@@ -65,6 +65,25 @@ def trigger_provision(db: Session, *, site, api_key: str, correlation_id: str | 
     db.add(site)
     db.commit()
 
+    # Seed the S3 turn-0 master from site-template/ as it ships in *this* checkout, before firing
+    # the Jenkins job -- so even a chat edit that races the job's own "ready" callback finds a real
+    # master to pull (sites/source.py's pull_master) instead of silently falling back to an empty
+    # tree. Best-effort: seeding failure shouldn't block provisioning itself (the Jenkins job's own
+    # docker build doesn't depend on S3 at all), so log and continue rather than mark_error/return.
+    from pathlib import Path
+
+    from mainforte.sites import source as site_source
+
+    template_dir = Path(__file__).resolve().parents[3] / "site-template"
+    if template_dir.is_dir():
+        try:
+            site_source.seed_turn_zero(site.id, template_dir)
+        except Exception:
+            logger.exception("failed to seed S3 turn-0 master for site %s from %s", site.id, template_dir)
+    else:
+        logger.warning("site-template dir not found at %s -- skipping S3 turn-0 seed for site %s",
+                        template_dir, site.id)
+
     result = trigger_jenkins_build(db, job_name, {
         "SITE_ID": site.id,
         "SUBDOMAIN": site.slug,

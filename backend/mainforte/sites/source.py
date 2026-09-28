@@ -90,17 +90,19 @@ def pull_master(site_id: str, correlation_id: str) -> TurnScratch:
 
 
 def validate_scratch(scratch: TurnScratch) -> str | None:
-    """Runs the same build the container itself needs (`node build.mjs` — see
-    site-template/dev.sh) against the scratch checkout. Returns None on success, or the raw
-    technical error text on failure (caller decides what to do with it — see catalog.py/router.py:
-    this is never shown to the user as-is). Skips cleanly (returns None) if the scratch tree has
-    no build.mjs yet (e.g. an empty first-pull before turn-0 seeding ever completed) — nothing to
-    validate in that case, not a failure."""
-    build_script = scratch.path / "build.mjs"
+    """Runs the same build the container itself needs (`node build.mjs`, run from
+    artifacts/api-server/ — see site-template/dev.sh's `cd "$API_DIR" && node ./build.mjs`, NOT the
+    scratch root) against the scratch checkout. Returns None on success, or the raw technical error
+    text on failure (caller decides what to do with it — see catalog.py/router.py: this is never
+    shown to the user as-is). Skips cleanly (returns None) if the scratch tree doesn't have this
+    file yet (e.g. an empty first-pull before turn-0 seeding ever completed, or a template layout
+    that hasn't been forked yet) — nothing to validate in that case, not a failure."""
+    api_dir = scratch.path / "artifacts" / "api-server"
+    build_script = api_dir / "build.mjs"
     if not build_script.is_file():
         return None
     result = subprocess.run(
-        ["node", "build.mjs"], cwd=scratch.path, capture_output=True, text=True, timeout=180,
+        ["node", "build.mjs"], cwd=api_dir, capture_output=True, text=True, timeout=180,
     )
     if result.returncode != 0:
         return (result.stderr or result.stdout or "build failed")[-4000:]

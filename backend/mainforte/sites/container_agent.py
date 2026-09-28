@@ -149,10 +149,15 @@ def docker_cp_in(db, site: Site, local_dir, *, exclude: tuple[str, ...] = ()) ->
 
     # Clear everything under APP_ROOT except the excluded dirs (node_modules etc.), so a
     # locally-deleted file actually disappears from the container instead of lingering forever.
+    # NOTE: the second `-exec` clause must NOT repeat `-mindepth 0` here — find applies mindepth
+    # per-expression-evaluation, not just to the initial descent, so a stray `-mindepth 0` on this
+    # branch would override the outer `-mindepth 1` and make APP_ROOT itself (depth 0) match too,
+    # rm -rf'ing the app root directory before docker cp gets a chance to write into it. Verified
+    # by hand against a scratch dir before landing this — see the fix in this same commit.
     prune_clause = " -o ".join(f"-name {shlex.quote(e)}" for e in exclude) or "-false"
     clear_cmd = (
         f"find {shlex.quote(APP_ROOT)} -mindepth 1 -maxdepth 1 "
-        f"\\( {prune_clause} \\) -prune -o -mindepth 0 -exec rm -rf {{}} + 2>/dev/null; true"
+        f"\\( {prune_clause} \\) -prune -o -exec rm -rf {{}} + 2>/dev/null; true"
     )
     _docker_exec(db, site, clear_cmd, timeout=60)
 

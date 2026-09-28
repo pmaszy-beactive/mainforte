@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+import httpx
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -100,13 +101,51 @@ def site_callback(site_id: str, body: CallbackBody, db: Session = Depends(get_db
     return {"ok": True}
 
 
-@router.get("/sites/preview/{token}/{path:path}")
-def preview_site(token: str, path: str, db: Session = Depends(get_db)):
-    """Proxies to the site container's dev port — unauthenticated beyond the capability token
-    itself, same trust model as widgets.py's serve_widget. Actual proxying (HAProxy vs. a thin
-    FastAPI httpx passthrough) is TBD at the point a real Jenkins job exists to test against; this
-    stub establishes the URL shape site_out() already promises callers."""
+# Request headers that must never be forwarded to the site container as-is: Host would make the
+# container's own framework see the wrong origin (breaks CORS/CSRF checks in the template's
+# app.ts), and hop-by-hop headers are meaningless (or actively wrong) to replay on a new
+# connection — same list uvicorn/starlette's own proxy examples exclude.
+_HOP_BY_HOP = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade",
+               "proxy-authenticate", "proxy-authorization", "te", "trailer"}
+
+
+@router.api_route("/sites/preview/{token}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def preview_site(token: str, path: str, request: Request, db: Session = Depends(get_db)):
+    """Proxies to the site container's dev port over plain `http://localhost:{dev_port}` — same
+    single-host assumption `container_agent.py`'s module docstring already documents (the mainforte
+    API process runs on the same backbone deploy host as site containers; see that docstring's
+    "Single-host assumption, explicit" note for what breaks if that ever stops being true and what
+    to do about it then). Unauthenticated beyond the capability token itself, same trust model as
+    widgets.py's serve_widget — a site's preview is meant to be shareable without a mainforte
+    login, same as a widget link.
+
+    Streams the container's response back verbatim (status, body, content-type) rather than
+    re-wrapping it, so the site's own frontend/API — including its own error pages — renders
+    exactly as it would if hit directly; this route's job is purely network reachability (the
+    container has no public port of its own), not response shaping.
+    """
     site = site_service.get_site_by_preview_token(db, token)
-    if not site or site.status != "ready":
+    if not site or site.status != "ready" or not site.dev_port:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "preview not available")
-    raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "preview proxy not wired yet")
+
+    upstream_url = f"http://localhost:{site.dev_port}/{path}"
+    forward_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
+    body = await request.body()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            upstream = await client.request(
+                request.method, upstream_url, params=request.query_params,
+                headers=forward_headers, content=body,
+            )
+    except httpx.RequestError:
+        # The container isn't actually reachable (crashed, still restarting after a live edit,
+        # etc.) — Site.status says "ready" but that only reflects the last known-good state from
+        # provisioning/the turn-end commit hook, not a live health check. Surface as a plain 502,
+        # never the raw connection error (PLAN.md's "never expose infra" rule applies to this
+        # route too, even though its caller is usually the frontend iframe, not the persona).
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "preview is temporarily unavailable")
+
+    response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_BY_HOP}
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers,
+                     media_type=upstream.headers.get("content-type"))
