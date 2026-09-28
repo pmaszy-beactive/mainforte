@@ -8,20 +8,24 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
+from sqlalchemy import Numeric, func
+
 from mainforte.auth import google
-from mainforte.auth.deps import Identity, current_identity, require_superuser
+from mainforte.auth.deps import Identity, current_identity, require_membership, require_superuser
 from mainforte.auth.jwt import mint_session
 from mainforte.auth.passwords import hash_password, verify_password
 from mainforte.auth.service import consume_token, create_user, issue_token, public_user
 from mainforte.config import get_settings
 from mainforte.crypto import encrypt
 from mainforte.db.base import utcnow
-from mainforte.db.models import Membership, OAuthIdentity, User, Workspace
+from mainforte.db.models import Event, Membership, OAuthIdentity, User, Workspace
 from mainforte.db.session import get_db
 from mainforte.events import emit
+from mainforte.events.onboarding import run_onboarding
 from mainforte.events.stream import sync_redis
 from mainforte.i18n import normalize_locale, valid_timezone
 from mainforte.mail import send_magic_link, send_password_reset
+from mainforte.workspaces.service import reset_workspace
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -38,6 +42,15 @@ class MeUpdate(BaseModel):
     name: str | None = Field(None, max_length=200)
     locale: str | None = None
     timezone: str | None = None
+
+
+class PrefsUpdate(BaseModel):
+    interaction_style: str | None = Field(None, max_length=200)
+    concierge_name: str | None = Field(None, max_length=80)
+
+
+class WorkspaceResetIn(BaseModel):
+    workspace_id: str | None = None
 
 
 class LoginIn(BaseModel):
@@ -295,3 +308,78 @@ def update_me(body: MeUpdate, ident: Identity = Depends(current_identity), db: S
     if changed:
         emit(db, "user.updated", user_id=u.id, actor=("user", ident.real_user.id), payload=changed)
     return public_user(u)
+
+
+@me_router.get("/me/usage")
+def my_usage(ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    ws_ids = [row[0] for row in db.query(Membership.workspace_id).filter(Membership.user_id == ident.user.id).all()]
+    if not ws_ids:
+        return {"usage_by_workspace": [], "total_cost_usd": 0.0}
+
+    cost_expr = func.sum(func.cast(Event.payload["cost_usd"].astext, Numeric))
+    in_tok_expr = func.sum(func.cast(Event.payload["input_tokens"].astext, Numeric))
+    out_tok_expr = func.sum(func.cast(Event.payload["output_tokens"].astext, Numeric))
+    rows = (
+        db.query(Event.ws_id, Workspace.name, in_tok_expr, out_tok_expr, cost_expr)
+        .join(Workspace, Workspace.id == Event.ws_id)
+        .filter(Event.type == "billing.usage.recorded", Event.ws_id.in_(ws_ids))
+        .group_by(Event.ws_id, Workspace.name)
+        .order_by(cost_expr.desc())
+        .all()
+    )
+    usage_by_workspace = [
+        {"ws_id": ws_id, "ws_name": ws_name, "input_tokens": int(in_tok or 0), "output_tokens": int(out_tok or 0),
+         "cost_usd": float(cost or 0.0)}
+        for ws_id, ws_name, in_tok, out_tok, cost in rows
+    ]
+    return {"usage_by_workspace": usage_by_workspace, "total_cost_usd": sum(r["cost_usd"] for r in usage_by_workspace)}
+
+
+@me_router.post("/me/prefs")
+def update_my_prefs(body: PrefsUpdate, ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    u = ident.user
+    changed: dict = {}
+    if body.interaction_style is not None and body.interaction_style != u.prefs.get("interaction_style"):
+        changed["interaction_style"] = body.interaction_style
+    if body.concierge_name is not None and body.concierge_name != u.prefs.get("concierge_name"):
+        changed["concierge_name"] = body.concierge_name
+    if changed:
+        u.prefs = {**u.prefs, **changed}
+        emit(db, "user.prefs.updated", user_id=u.id, actor=("user", ident.real_user.id),
+             payload={"updated_keys": list(changed.keys())})
+
+        cname = changed.get("concierge_name")
+        if cname:
+            from mainforte.db.models import Persona
+            from mainforte.personas.service import rename
+
+            ws_ids = [row[0] for row in db.query(Membership.workspace_id).filter(Membership.user_id == u.id).all()]
+            personas = (
+                db.query(Persona)
+                .filter(Persona.ws_id.in_(ws_ids), Persona.slug == "concierge", Persona.status == "active")
+                .all()
+                if ws_ids else []
+            )
+            for concierge in personas:
+                if concierge.name != cname:
+                    rename(db, persona=concierge, name=cname, actor=("user", ident.real_user.id))
+    return {"prefs": u.prefs}
+
+
+@me_router.post("/me/reset")
+def reset_my_workspace(body: WorkspaceResetIn, ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    workspace_id = body.workspace_id
+    if not workspace_id:
+        owned = (
+            db.query(Membership.workspace_id)
+            .filter(Membership.user_id == ident.user.id, Membership.role == "owner")
+            .first()
+        )
+        if not owned:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no owned workspace to reset")
+        workspace_id = owned[0]
+    ws = require_membership(workspace_id, ident, db, roles={"owner"})
+    reset_workspace(db, ws_id=ws.id, actor=("user", ident.real_user.id))
+    db.commit()
+    run_onboarding(ws.id, user_id=ident.user.id)
+    return {"ok": True, "workspace_id": ws.id}

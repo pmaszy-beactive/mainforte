@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook: auto-increment patch version in version.ini
+# Install: git config core.hooksPath .githooks
+#
+
+VERSION_FILE="version.ini"
+
+if [ ! -f "$VERSION_FILE" ]; then
+  echo "[version-hook] version.ini not found, skipping version bump"
+  exit 0
+fi
+
+CURRENT=$(grep -E "^version\s*=" "$VERSION_FILE" | sed 's/^version\s*=\s*//' | tr -d '[:space:]')
+
+if [ -z "$CURRENT" ]; then
+  echo "[version-hook] Could not parse version from version.ini, skipping"
+  exit 0
+fi
+
+MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+MINOR=$(echo "$CURRENT" | cut -d. -f2)
+PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+MAJOR=${MAJOR:-0}
+MINOR=${MINOR:-0}
+PATCH=${PATCH:-0}
+
+NEW_PATCH=$((PATCH + 1))
+
+cat > "$VERSION_FILE" <<EOF
+[version]
+version = ${MAJOR}.${MINOR}.${NEW_PATCH}
+EOF
+
+git add "$VERSION_FILE"
+
+echo "[version-hook] Version bumped to ${MAJOR}.${MINOR}.${NEW_PATCH}"

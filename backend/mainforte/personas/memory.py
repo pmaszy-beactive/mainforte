@@ -5,13 +5,13 @@ from __future__ import annotations
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from mainforte.db.models import Event, Memory, Persona
+from mainforte.db.models import Event, Memory, Persona, User
 
 MEMORY_LIMIT = 20
 HISTORY_LIMIT = 20
 
 
-def build_system_prompt(db: Session, *, ws_id: str, persona: Persona, base: str) -> str:
+def build_system_prompt(db: Session, *, ws_id: str, persona: Persona, base: str, user: User | None = None) -> str:
     rows = (
         db.query(Memory)
         .filter(
@@ -25,10 +25,27 @@ def build_system_prompt(db: Session, *, ws_id: str, persona: Persona, base: str)
         .limit(MEMORY_LIMIT)
         .all()
     )
-    if not rows:
-        return base
-    notes = "\n".join(f"- {r.text}" for r in reversed(rows))
-    return f"{base}\n\n## Workspace memory\n{notes}"
+    out = base
+    if rows:
+        notes = "\n".join(f"- {r.text}" for r in reversed(rows))
+        out = f"{out}\n\n## Workspace memory\n{notes}"
+
+    flavor = (persona.settings or {}).get("personality_flavor")
+    if flavor:
+        out = f"{out}\n\n## Personality\n{flavor}"
+
+    if user and user.prefs:
+        lines = []
+        cname = user.prefs.get("concierge_name")
+        if cname and persona.slug == "concierge":
+            lines.append(f'This member calls you "{cname}".')
+        style = user.prefs.get("interaction_style")
+        if style:
+            lines.append(f"Preferred interaction style: {style}")
+        if lines:
+            out = f"{out}\n\n## This member's preferences\n" + "\n".join(f"- {l}" for l in lines)
+
+    return out
 
 
 def recent_thread_messages(db: Session, *, thread_id: str | None, limit: int = HISTORY_LIMIT) -> list[dict[str, str]]:

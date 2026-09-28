@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 from sqlalchemy.orm import Session
 
 from mainforte.db.models import Persona
@@ -15,6 +17,21 @@ def seed_defaults(db: Session, *, ws_id: str, actor: tuple[str, str | None]) -> 
     return created
 
 
+def _random_name(slug: str, arche: catalog.Archetype) -> str:
+    """Pick a display name when the caller doesn't specify one. Concierge always keeps its default
+    name — the member names it themselves during the onboarding interview instead (see
+    events/onboarding.py) — every other archetype gets a random first name from its pool, paired
+    with the role suffix already baked into default_name (e.g. "Morgan (PM)")."""
+    if slug == "concierge":
+        return arche.default_name
+    pool = catalog.NAME_POOLS.get(slug)
+    if not pool:
+        return arche.default_name
+    first = random.choice(pool)
+    suffix = arche.default_name.split("(", 1)
+    return f"{first} ({suffix[1]}" if len(suffix) == 2 else first
+
+
 def invite(db: Session, *, ws_id: str, slug: str, actor: tuple[str, str | None], name: str | None = None) -> Persona:
     arche = catalog.get(slug)
     if arche is None:
@@ -25,7 +42,10 @@ def invite(db: Session, *, ws_id: str, slug: str, actor: tuple[str, str | None],
             existing.status = "active"
             emit(db, "persona.invited", ws_id=ws_id, actor=actor, payload={"persona_id": existing.id, "slug": slug})
         return existing
-    p = Persona(ws_id=ws_id, slug=slug, name=name or arche.default_name, model=arche.default_model)
+    p = Persona(
+        ws_id=ws_id, slug=slug, name=name or _random_name(slug, arche), model=arche.default_model,
+        settings={"personality_flavor": random.choice(catalog.FLAVOR_SNIPPETS)},
+    )
     db.add(p)
     db.flush()
     emit(db, "persona.invited", ws_id=ws_id, actor=actor, payload={"persona_id": p.id, "slug": slug, "name": p.name})

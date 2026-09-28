@@ -246,6 +246,58 @@ class Widget(IdMixin, TimestampMixin, Base):
     token: Mapped[str] = mapped_column(String(26), nullable=False, unique=True, index=True)
 
 
+# ---------------------------------------------------------------- sites
+
+
+class Site(IdMixin, TimestampMixin, Base):
+    """A chat-built, live-editable, publishable business web app: a real provisioned container
+    running a full Node.js frontend+backend (not a static bundle like Widget — see widgets.py's
+    docstring for that contrast). Modeled after AgentWorker (one row per externally-provisioned
+    container with lifecycle status + heartbeat) rather than Widget, since a Site is fundamentally
+    a live process, not a versioned static artifact.
+
+    `status` is the technical lifecycle; `stage` is the user-facing draft/published state. These
+    are deliberately separate columns (not one derived from the other) so the frontend never has
+    to infer user-facing state from infra state — a crash-looping container must never read as
+    "published" just because `stage` says so, and a healthy draft must never show scary infra
+    status. See PLAN.md's Sites section for the full rationale.
+
+    `last_error` holds the raw technical failure for admin/debug surfaces only — never serialize
+    this into any user-facing API response. End users only ever see `status`/`stage`; failures are
+    translated to plain language by the persona in chat, not by exposing this field."""
+
+    __tablename__ = "sites"
+    __table_args__ = (UniqueConstraint("ws_id", "slug", name="uq_site_ws_slug"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False)  # subdomain-safe: {slug}.mainforte.ai
+    name: Mapped[str] = mapped_column(String(200), nullable=False)  # user-facing business name
+    brief: Mapped[str] = mapped_column(Text, nullable=False)  # the original chat description
+    # provisioning|ready|building|error|destroying — technical lifecycle only, never shown raw to users
+    status: Mapped[str] = mapped_column(String(20), default="provisioning", nullable=False)
+    stage: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)  # draft|published
+    container_name: Mapped[str | None] = mapped_column(String(120))
+    dev_port: Mapped[int | None] = mapped_column(Integer)
+    container_api_key_hash: Mapped[str | None] = mapped_column(String(128))
+    # This site's own Postgres role password, Fernet-encrypted (mainforte.crypto.encrypt/decrypt,
+    # same as bastion.ssh_key in db_settings.py) -- NOT hashed like container_api_key_hash, because
+    # the persona's DB tools need the live plaintext back to build a DATABASE_URL for lookups/
+    # queries against this site's database, not just to verify a value someone else presents.
+    # DB_NAME/DB_USER are never stored: both are deterministic ("site_{slug}", see provisioning.py)
+    # and reconstructible from `slug` alone.
+    db_password_encrypted: Mapped[str | None] = mapped_column(Text)
+    preview_token: Mapped[str] = mapped_column(String(26), nullable=False, unique=True, index=True)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)  # raw technical error — admin/debug only, never user-facing
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_thread_id: Mapped[str | None] = mapped_column(String(26))  # chat thread this site is edited from
+    # Which sites/{id}/source/{version}.tar.zst (storage.site_source_key) is currently live in the
+    # container — see sites/source.py and PLAN.md's Sites "Live editing" > "S3 object shape". 0 is
+    # the turn-0 master seeded at provisioning, before any chat edit.
+    source_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
 # ---------------------------------------------------------------- billing (P3)
 
 

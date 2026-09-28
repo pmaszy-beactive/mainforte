@@ -28,6 +28,7 @@ from mainforte.marketplace.routes import router as marketplace_router
 from mainforte.personas.routes import router as personas_router
 from mainforte.push import router as push_router
 from mainforte.scheduler import scheduler
+from mainforte.sites.routes import router as sites_router
 from mainforte.tasks.routes import router as tasks_router
 
 # The in-process scheduler (below) looks tasks up by name in `celery.tasks`, which Celery only
@@ -66,7 +67,8 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, setting
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth_router, me_router, ws_router, chat_router, personas_router, admin_router, socket_router,
-          tasks_router, widgets_router, billing_router, stripe_webhook_router, push_router, marketplace_router):
+          tasks_router, widgets_router, billing_router, stripe_webhook_router, push_router, marketplace_router,
+          sites_router):
     app.include_router(r)
 
 

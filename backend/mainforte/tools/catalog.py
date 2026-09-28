@@ -301,13 +301,16 @@ _register(Tool(
 ))
 
 
-def _create_widget(*, ws_id: str, owner_id: str, title: str, slug: str, html: str,
+def _create_widget(*, ws_id: str, title: str, slug: str, html: str,
                     data: dict[str, Any] | None = None, refresh_spec: dict[str, Any] | None = None,
                     correlation_id: str | None = None, **_kwargs: Any) -> dict[str, Any]:
     """In-process handler for the `create_widget` tool: writes the bundle to storage and creates
     the Widget row. No sandbox needed — this only touches Storage/DB, never runs the persona's
-    HTML (see PLAN.md P2 phase 7)."""
+    HTML (see PLAN.md P2 phase 7). `owner_id` isn't caller-supplied (the LLM has no user id to
+    give, and personas/router.py only injects ws_id) — resolved here from Workspace.owner_id, the
+    same collapse-to-one-user convention tasks/work.py's `_home_owner` already uses."""
     from mainforte.config import get_settings
+    from mainforte.db.models import Workspace
     from mainforte.db.session import db_session
     from mainforte.events import emit
     from mainforte.storage import safe_name
@@ -315,6 +318,10 @@ def _create_widget(*, ws_id: str, owner_id: str, title: str, slug: str, html: st
 
     safe_slug = safe_name(slug)
     with db_session() as db:
+        ws = db.get(Workspace, ws_id)
+        if ws is None:
+            raise ValueError(f"workspace {ws_id!r} not found")
+        owner_id = ws.owner_id
         widget = _create(db, ws_id=ws_id, owner_id=owner_id, title=title, slug=safe_slug,
                           html=html, data=data or {}, refresh_spec=refresh_spec)
         emit(db, "widget.created", ws_id=ws_id, actor=("persona", owner_id), correlation_id=correlation_id,
@@ -481,5 +488,219 @@ _register(Tool(
         "required": ["verb"],
     },
     handler=_car_search_state,
+    sandboxed=False,
+))
+
+
+# ---------------------------------------------------------------- sites (PLAN.md Sites section)
+#
+# These are sandboxed=False, in-process handlers — same category as _create_widget above — even
+# though they run arbitrary-looking file I/O, because the isolation problem they solve is
+# different from bash/read_file/etc.'s: those need protection from a single untrusted LLM-directed
+# command running on *this* machine, so they're dispatched into a throwaway sandboxed workspace
+# per call. These tools instead need to reach ONE specific, already-provisioned remote container
+# (Site.container_name) over SSH through the bastion — an authorization/addressing concern, not a
+# local-execution-isolation one. See sites/container_agent.py's docstring for the full rationale.
+
+
+def _create_site(*, ws_id: str, name: str, brief: str, thread_id: str | None = None,
+                  correlation_id: str | None = None, **_kwargs: Any) -> dict[str, Any]:
+    """Creates the Site row and kicks off provisioning. owner_id resolved from Workspace.owner_id
+    (same convention as _create_widget above) — the LLM has no user id to supply. Returns only the
+    plain-language status shape (sites.service.site_out) — never raw status/container detail; see
+    that module's docstring."""
+    from mainforte.db.models import Workspace
+    from mainforte.db.session import db_session
+    from mainforte.events import emit
+    from mainforte.sites import service as site_service
+    from mainforte.sites.provisioning import trigger_provision
+
+    with db_session() as db:
+        ws = db.get(Workspace, ws_id)
+        if ws is None:
+            raise ValueError(f"workspace {ws_id!r} not found")
+        site, api_key = site_service.create_site(
+            db, ws_id=ws_id, owner_id=ws.owner_id, name=name, brief=brief, agent_thread_id=thread_id,
+        )
+        emit(db, "site.created", ws_id=ws_id, actor=("persona", None), correlation_id=correlation_id,
+             payload={"site_id": site.id, "name": name, "slug": site.slug})
+        trigger_provision(db, site=site, api_key=api_key, correlation_id=correlation_id)
+        out = site_service.site_out(site)
+    return out
+
+
+_register(Tool(
+    name="create_site",
+    description=(
+        "Start building a real, live web app for the user's business from a plain-language "
+        "description. Use this the first time a user describes a business they want a site for. "
+        "This kicks off provisioning in the background — it will not be ready instantly; tell the "
+        "user you're setting things up, never mention containers, builds, or infrastructure."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "User-facing business/site name"},
+            "brief": {"type": "string", "description": "The user's description of what the site should be/do"},
+        },
+        "required": ["name", "brief"],
+    },
+    handler=_create_site,
+    sandboxed=False,
+))
+
+
+def _load_site(*, site_id: str, ws_id: str):
+    from mainforte.db.models import Site
+
+    from mainforte.db.session import db_session
+
+    with db_session() as db:
+        site = db.get(Site, site_id)
+        if site is None or site.ws_id != ws_id:
+            raise ValueError("site not found")
+        db.expunge(site)
+        return site
+
+
+def _scratch_file_path(site_id: str, correlation_id: str, rel_path: str):
+    """Resolves `rel_path` against this turn's local scratch checkout and rejects any escape from
+    it. Mirrors container_agent.py's `_assert_safe_rel_path`, reimplemented here since this now
+    guards local filesystem access rather than a remote `docker exec` path.
+
+    Pulls the S3 master into scratch on first access within a turn (idempotent — pull_master wipes
+    and redoes the scratch dir, so this is safe to call from every one of a turn's tool calls; it
+    only actually hits S3 the first time since subsequent calls in the same turn find the dir
+    already populated). This keeps the "pull once per turn" behavior self-contained in the tool
+    handlers rather than requiring router.py's dispatch loop to know about Sites specifically
+    before it ever sees a site tool call."""
+    from mainforte.sites import source as site_source
+    from mainforte.sites.container_agent import ContainerAgentError, _assert_safe_rel_path
+
+    if not correlation_id:
+        raise ContainerAgentError("site file tools require a correlation_id (turn scratch not available)")
+    base = site_source._scratch_path(site_id, correlation_id)
+    if not base.exists():
+        site_source.pull_master(site_id, correlation_id)
+    safe = _assert_safe_rel_path(rel_path) if rel_path not in (".", "") else "."
+    return (base / safe) if safe != "." else base
+
+
+def _read_site_file(*, site_id: str, path: str, ws_id: str, correlation_id: str | None = None,
+                     **_kwargs: Any) -> dict[str, Any]:
+    """Reads from the turn's local scratch checkout, not the live container — see
+    sites/source.py's module docstring for why. _load_site is still called first purely to
+    enforce ws_id scoping (a persona must never read a site outside its own workspace), even
+    though the file bytes themselves come from local disk."""
+    _load_site(site_id=site_id, ws_id=ws_id)
+    fp = _scratch_file_path(site_id, correlation_id, path)
+    if not fp.is_file():
+        raise ValueError(f"no such file: {path!r}")
+    return {"content": fp.read_text(errors="replace")[:200_000]}
+
+
+_register(Tool(
+    name="read_site_file",
+    description="Read a file from a site's live workspace, relative to the app root. Use before "
+                "editing to see current content.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "site_id": {"type": "string"},
+            "path": {"type": "string", "description": "Path relative to the site's app root"},
+        },
+        "required": ["site_id", "path"],
+    },
+    handler=_read_site_file,
+    sandboxed=False,
+))
+
+
+def _write_site_file(*, site_id: str, path: str, content: str, ws_id: str,
+                      correlation_id: str | None = None, **_kwargs: Any) -> dict[str, Any]:
+    """Writes into the turn's local scratch checkout — plain filesystem I/O, no docker exec. The
+    change only reaches the running container (and S3) at turn end, via router.py's
+    _commit_dirty_site_scratches, once validation (source.validate_scratch) passes; see
+    sites/source.py's module docstring for the full per-turn flow."""
+    from mainforte.db.session import db_session
+    from mainforte.events import emit
+
+    _load_site(site_id=site_id, ws_id=ws_id)
+    fp = _scratch_file_path(site_id, correlation_id, path)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_text(content)
+    with db_session() as db:
+        emit(db, "site.file.changed", ws_id=ws_id, actor=("persona", None), correlation_id=correlation_id,
+             payload={"site_id": site_id, "path": path})
+    return {"ok": True}
+
+
+_register(Tool(
+    name="write_site_file",
+    description="Write (create or overwrite) a file in a site's live workspace. The site's dev "
+                "server hot-reloads automatically — do not mention files, containers, or servers "
+                "when describing this to the user; describe the visible product change instead.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "site_id": {"type": "string"},
+            "path": {"type": "string", "description": "Path relative to the site's app root"},
+            "content": {"type": "string", "description": "Full new file content"},
+        },
+        "required": ["site_id", "path", "content"],
+    },
+    handler=_write_site_file,
+    sandboxed=False,
+))
+
+
+def _list_site_files(*, site_id: str, path: str = ".", ws_id: str, correlation_id: str | None = None,
+                      **_kwargs: Any) -> dict[str, Any]:
+    _load_site(site_id=site_id, ws_id=ws_id)
+    dp = _scratch_file_path(site_id, correlation_id, path)
+    if not dp.is_dir():
+        raise ValueError(f"no such directory: {path!r}")
+    entries = sorted(
+        (p.name + "/" if p.is_dir() else p.name) for p in dp.iterdir() if not p.name.startswith(".")
+    )
+    return {"entries": entries}
+
+
+_register(Tool(
+    name="list_site_files",
+    description="List files and directories in a site's live workspace, relative to the app root.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "site_id": {"type": "string"},
+            "path": {"type": "string", "description": "Directory path relative to the app root; defaults to root"},
+        },
+        "required": ["site_id"],
+    },
+    handler=_list_site_files,
+    sandboxed=False,
+))
+
+
+def _read_site_logs(*, site_id: str, ws_id: str, **_kwargs: Any) -> dict[str, Any]:
+    from mainforte.db.session import db_session
+    from mainforte.sites.container_agent import read_logs
+
+    site = _load_site(site_id=site_id, ws_id=ws_id)
+    with db_session() as db:
+        return {"logs": read_logs(db, site)}
+
+
+_register(Tool(
+    name="read_site_logs",
+    description="Read recent server logs from a site's running container — use to diagnose a "
+                "problem before telling the user something is wrong; never quote raw log lines "
+                "back to the user, translate the underlying issue into plain language instead.",
+    input_schema={
+        "type": "object",
+        "properties": {"site_id": {"type": "string"}},
+        "required": ["site_id"],
+    },
+    handler=_read_site_logs,
     sandboxed=False,
 ))

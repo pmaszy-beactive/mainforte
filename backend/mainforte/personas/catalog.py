@@ -130,6 +130,32 @@ ARCHETYPES: dict[str, Archetype] = {
 
 DEFAULT_ON_CREATE = ("concierge",)
 
+# First-name pools used to randomize a persona's display name on invite, when the caller doesn't
+# supply one explicitly. Concierge is deliberately excluded — its name is chosen by the member
+# during the onboarding interview instead (see events/onboarding.py), never randomized.
+NAME_POOLS: dict[str, list[str]] = {
+    "pm": ["Morgan", "Priya", "Diego", "Nadia"],
+    "cfo": ["Sam", "Elena", "Marcus", "Wei"],
+    "architect": ["Iris", "Tomas", "Aisha", "Lena"],
+    "marketer": ["Jules", "Carmen", "Theo", "Ngozi"],
+    "coder": ["Ash", "Kenji", "Ines", "Leo"],
+    "executor": ["Rae", "Omar", "Sofia", "Piotr"],
+}
+
+# Short, safe personality-flavor snippets. Assigned at random on invite and appended to a
+# persona's system prompt (see personas/router.py) so instances of the same archetype don't all
+# sound identical across workspaces.
+FLAVOR_SNIPPETS: list[str] = [
+    "You have a dry sense of humor you deploy sparingly.",
+    "You're a little old-fashioned in your phrasing, and you like it that way.",
+    "You're upbeat and not afraid of the occasional exclamation point.",
+    "You favor short, plain sentences over embellishment.",
+    "You ask one good clarifying question before diving in, when it's warranted.",
+    "You have a habit of naming the trade-off out loud before making a call.",
+    "You're warm but economical with words — you say the useful thing once.",
+    "You like a good analogy when it actually clarifies something.",
+]
+
 
 def get(slug: str) -> Archetype | None:
     return ARCHETYPES.get(slug)

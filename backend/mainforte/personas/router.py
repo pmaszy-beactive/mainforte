@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.aiproxy.pricing import estimate_cost_usd
-from mainforte.db.models import Persona, Workspace
+from mainforte.db.models import Persona, User, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit, emit_ephemeral
 from mainforte.events.governor import _extract_claims, ground_action_claims
@@ -239,12 +239,78 @@ async def _ground_and_correct(*, api_key: str, ws_id: str, thread_id: str | None
     return corrected
 
 
+def _commit_dirty_site_scratches(ws_id: str, correlation_id: str) -> None:
+    """Turn-end hook for the Sites live-editing flow (PLAN.md's "Live editing: revised design",
+    sites/source.py's module docstring): if this turn's tool calls left a local scratch checkout
+    under /tmp/sites/*/{correlation_id}/ (write_site_file creates it lazily on first write — see
+    tools/catalog.py's `_scratch_file_path`), validate it, ship it into the running container, and
+    only on success commit it back to S3 as the new master + bump `Site.source_version`. A build
+    failure or a crash-on-restart is fed back as a plain `site.error`-style event rather than
+    raised — this always runs from the same final `with db_session()` block as
+    persona.reply.ended/.error, after the reply itself is already decided, so a sync failure here
+    must never turn a successful chat reply into a failed one; it's reported as its own event, and
+    the site's `last_error` is set for the persona's *next* turn to notice and explain in plain
+    language (never this turn's already-streamed reply).
+
+    Scans SCRATCH_ROOT for `*/{correlation_id}` dirs rather than tracking "which sites did this
+    turn touch" through the dispatch loop above — simpler than threading extra state through every
+    tool call, and correct since correlation_id is unique per turn (sites/source.py's
+    `_scratch_path` keys on it for exactly this reason)."""
+    from mainforte.db.models import Site
+    from mainforte.sites import service as site_service
+    from mainforte.sites import source as site_source
+
+    if not site_source.SCRATCH_ROOT.is_dir():
+        return
+    for site_dir in site_source.SCRATCH_ROOT.iterdir():
+        scratch_dir = site_dir / correlation_id
+        if not scratch_dir.is_dir():
+            continue
+        site_id = site_dir.name
+        with db_session() as db:
+            site = db.get(Site, site_id)
+            if site is None or site.ws_id != ws_id:
+                # Not this workspace's site (shouldn't happen — _load_site already scoped every
+                # tool call — but never sync/commit something we can't re-verify ownership of).
+                site_source.discard_scratch(site_id, correlation_id)
+                continue
+            scratch = site_source.TurnScratch(site_id=site_id, version=site.source_version, path=scratch_dir)
+            try:
+                build_error = site_source.validate_scratch(scratch)
+                ship_error = build_error or site_source.ship_to_container(db, site, scratch)
+                if ship_error:
+                    site_service.mark_error(db, site, error=build_error or ship_error)
+                    emit(db, "build.failed", ws_id=ws_id, actor=("persona", None),
+                         correlation_id=correlation_id, payload={"site_id": site_id})
+                    emit(db, "site.error", ws_id=ws_id, actor=("persona", None), correlation_id=correlation_id,
+                         payload={"site_id": site_id, "message": "edit_failed"})
+                    continue
+                new_version = site_source.commit_turn(site_id, correlation_id, scratch)
+                site.source_version = new_version
+                # Generic build.* namespace, not a parallel site.build.* — matches
+                # provisioning.py's handle_callback convention (see events/types.py's comment on
+                # the site.* block) and site.file.changed already emitted per-write above covers
+                # the site-specific "what changed" signal; this event is just "the build ran ok".
+                emit(db, "build.succeeded", ws_id=ws_id, actor=("persona", None),
+                     correlation_id=correlation_id, payload={"site_id": site_id, "version": new_version})
+            except Exception as e:
+                log.exception("site scratch commit failed site=%s corr=%s", site_id, correlation_id)
+                site_service.mark_error(db, site, error=str(e))
+                emit(db, "build.failed", ws_id=ws_id, actor=("persona", None),
+                     correlation_id=correlation_id, payload={"site_id": site_id})
+                emit(db, "site.error", ws_id=ws_id, actor=("persona", None), correlation_id=correlation_id,
+                     payload={"site_id": site_id, "message": "edit_exception"})
+            finally:
+                site_source.discard_scratch(site_id, correlation_id)
+
+
 async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, persona: Persona,
-                     api_key: str | None, history: list[dict[str, Any]], user_text: str) -> None:
+                     api_key: str | None, history: list[dict[str, Any]], user_text: str,
+                     user: User | None = None) -> None:
     arche = catalog.get(persona.slug)
     base = arche.system_prompt if arche else "You are a helpful assistant."
     with db_session() as db:
-        system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base)
+        system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base, user=user)
     started = emit_ephemeral(
         "persona.reply.started", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
         correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id},
@@ -351,6 +417,21 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                         if tu.name == "create_task":
                             call_input.update(ws_id=ws_id, thread_id=thread_id, persona_id=persona.id,
                                                correlation_id=correlation_id)
+                        elif tu.name == "create_widget":
+                            # Pre-existing gap: create_widget's handler requires ws_id/owner_id but
+                            # its input_schema never asks the model for them (there's no way for
+                            # the LLM to know a workspace/user id) — inject ws_id from the request
+                            # context, same as create_task above; the handler itself resolves
+                            # owner_id from ws_id (Workspace.owner_id), same collapse-to-one-user
+                            # convention tasks/work.py's _home_owner already uses.
+                            call_input.update(ws_id=ws_id, correlation_id=correlation_id)
+                        elif tu.name == "create_site":
+                            call_input.update(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id)
+                        elif tu.name in ("read_site_file", "write_site_file", "list_site_files", "read_site_logs"):
+                            # Sites tools (PLAN.md Sites section): scoped to the calling workspace
+                            # so a persona can never reach a site outside it, mirroring create_task
+                            # and create_widget above.
+                            call_input.update(ws_id=ws_id, correlation_id=correlation_id)
                         result = tool.handler(**call_input)
                         with db_session() as db:
                             emit(db, "tool.ended", ws_id=ws_id, actor=("persona", persona.slug),
@@ -410,6 +491,16 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                           "input_tokens": in_tok, "output_tokens": out_tok,
                           "cost_usd": estimate_cost_usd(persona.model, in_tok, out_tok)})
 
+    # Sites live-editing turn-end hook (PLAN.md's "Live editing: revised design") — runs after the
+    # reply itself is fully decided and emitted above, in its own db_session (not nested in the one
+    # above: _commit_dirty_site_scratches opens a fresh session per dirty site, and a sync failure
+    # here must never affect the already-emitted persona.reply.* event). No-op if this turn never
+    # called write_site_file (the scratch-dir scan below finds nothing and returns immediately).
+    try:
+        _commit_dirty_site_scratches(ws_id, correlation_id)
+    except Exception:
+        log.exception("site scratch commit sweep failed ws=%s corr=%s", ws_id, correlation_id)
+
 
 def route_message(event: dict[str, Any]) -> None:
     """Handler for chat.message.created. Sync entry point (Celery), drives async work internally."""
@@ -422,6 +513,7 @@ def route_message(event: dict[str, Any]) -> None:
     thread_id = payload.get("thread_id")
     user_text = payload.get("text") or ""
     correlation_id = event.get("correlation_id") or thread_id or new_id()
+    user_id = event.get("user_id")
 
     with db_session() as db:
         ws = db.get(Workspace, ws_id)
@@ -432,6 +524,7 @@ def route_message(event: dict[str, Any]) -> None:
             return
         targets = _pick_personas(user_text, roster)
         api_key = get_or_mint(db, ws)
+        user = db.get(User, user_id) if user_id else None
         current = {"role": "user", "content": user_text.strip() or "(attachment only)"}
         history = [*recent_thread_messages(db, thread_id=thread_id), current]
 
@@ -440,6 +533,10 @@ def route_message(event: dict[str, Any]) -> None:
             if _is_canceled(ws_id, thread_id, correlation_id):
                 break
             await run_reply(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
-                             api_key=api_key, history=history, user_text=user_text)
+                             api_key=api_key, history=history, user_text=user_text, user=user)
 
     asyncio.run(_run_all())
+
+    if user_id:
+        from mainforte.personas.onboarding_extract import maybe_extract_prefs
+        maybe_extract_prefs(ws_id=ws_id, user_id=user_id, user_text=user_text)
