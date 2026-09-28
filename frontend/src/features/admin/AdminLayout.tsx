@@ -2,14 +2,19 @@ import { Suspense } from "react";
 import { Link, NavLink, Outlet } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { Logo } from "@/components/ui/Logo";
 import { FullPageSpinner } from "@/components/ui/Spinner";
 import { cn } from "@/lib/cn";
+import { api } from "@/lib/api";
 
 const tabs = ["settings", "users", "finances", "errors", "jobs", "tasks", "workers", "events"] as const;
 
 export default function AdminLayout() {
   const { t } = useTranslation();
+  // Same query the Workers tab polls, so this stamp and each worker's version in that table can
+  // never drift apart — both read app_version/worker.version off one response.
+  const versionQuery = useQuery({ queryKey: ["admin", "workers"], queryFn: api.admin.workers, refetchInterval: 10_000 });
   return (
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-10 border-b border-white/5 bg-ink-900/70 backdrop-blur-md">
@@ -42,6 +47,11 @@ export default function AdminLayout() {
           <Outlet />
         </Suspense>
       </main>
+      {versionQuery.data && (
+        <div className="pointer-events-none fixed bottom-2 right-3 z-10 font-mono text-[11px] text-fog-500/70">
+          v{versionQuery.data.app_version}
+        </div>
+      )}
     </div>
   );
 }

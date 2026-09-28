@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import logging
+import threading
+
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_shutdown, worker_ready
 from kombu import Queue
 
 from mainforte.config import get_settings
+
+log = logging.getLogger(__name__)
 
 s = get_settings()
 
@@ -47,6 +53,45 @@ celery.conf.update(
     imports=("mainforte.tasks.events", "mainforte.tasks.system", "mainforte.tasks.work", "mainforte.tasks.billing",
              "mainforte.tasks.healing", "mainforte.tasks.schedule", "mainforte.push"),
 )
+
+
+# Pooled worker containers (Dockerfile.worker) run plain `celery worker`, no `--beat` -- only the
+# API container's in-process scheduler fallback (scheduler.py) drives beat_schedule, and it runs
+# each entry in ITS OWN process, so `worker-heartbeat` firing there would self-register the API
+# container, never the actual pooled worker. Each worker process therefore needs to heartbeat
+# itself: this thread calls worker_heartbeat.apply() (in-process, no broker hop -- it's this same
+# worker registering itself) every 30s for as long as this worker process is alive, so
+# _reconcile_pool (tasks/system.py) sees it as live instead of endlessly re-provisioning it.
+_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_heartbeat_stop = threading.Event()
+_heartbeat_thread: threading.Thread | None = None
+
+
+def _heartbeat_loop() -> None:
+    from mainforte.tasks.system import worker_heartbeat
+
+    while not _heartbeat_stop.is_set():
+        try:
+            worker_heartbeat.apply()
+        except Exception:
+            log.exception("self-heartbeat: worker_heartbeat raised")
+        _heartbeat_stop.wait(_HEARTBEAT_INTERVAL_SECONDS)
+
+
+@worker_ready.connect
+def _start_self_heartbeat(**kwargs) -> None:
+    global _heartbeat_thread
+    if _heartbeat_thread is not None:
+        return
+    _heartbeat_stop.clear()
+    _heartbeat_thread = threading.Thread(target=_heartbeat_loop, name="worker-self-heartbeat", daemon=True)
+    _heartbeat_thread.start()
+    log.info("self-heartbeat thread started (interval=%ss)", _HEARTBEAT_INTERVAL_SECONDS)
+
+
+@worker_process_shutdown.connect
+def _stop_self_heartbeat(**kwargs) -> None:
+    _heartbeat_stop.set()
 
 
 def queue_depths() -> dict[str, int]:

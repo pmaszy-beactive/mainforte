@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Numeric, case, func
 from sqlalchemy.orm import Session
 
+from mainforte import __version__
 from mainforte.auth.deps import Identity, require_superuser
 from mainforte.db.base import utcnow
 from mainforte.db.models import (
@@ -168,8 +169,9 @@ def workers(db: Session = Depends(get_db)):
     return {"desired": pools["full"],  # back-compat: existing UI reads this as the default pool's count
             "pools": pools,
             "reconciler_configured": _is_configured(get_bastion_jenkins_config(db)),
+            "app_version": __version__,
             "workers": [{"id": w.id, "status": ("offline" if (w.last_heartbeat or stale) <= stale and w.status == "online" else w.status),
-                         "node": w.node, "container_name": w.container_name,
+                         "node": w.node, "container_name": w.container_name, "version": w.version,
                          "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
                          "current_job": w.current_job, "stats": w.stats} for w in rows]}
 

@@ -94,7 +94,7 @@ export default function WorkersTab() {
       header: t("admin.workers.status"),
       render: (w) => <Badge tone={w.status === "online" ? "green" : w.status === "offline" ? "red" : "amber"}>{w.status}</Badge>,
     },
-    { key: "node", header: t("admin.workers.node"), render: (w) => w.node },
+    { key: "version", header: t("admin.workers.version"), render: (w) => <span className="font-mono text-xs">{w.version ?? "—"}</span> },
     { key: "hb", header: t("admin.workers.heartbeat"), render: (w) => <span className="text-fog-500">{f.relative(w.last_heartbeat)}</span> },
     { key: "job", header: t("admin.workers.currentJob"), render: (w) => <span className="font-mono text-xs text-fog-500">{w.current_job ?? "—"}</span> },
   ];

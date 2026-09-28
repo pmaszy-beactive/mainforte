@@ -380,6 +380,7 @@
     "workers": {
       "status": "État",
       "node": "Nœud",
+      "version": "Version",
       "heartbeat": "Signal de vie",
       "currentJob": "Tâche en cours",
       "desired": "Nombre souhaité",

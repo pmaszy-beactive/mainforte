@@ -380,6 +380,7 @@
     "workers": {
       "status": "Status",
       "node": "Node",
+      "version": "Version",
       "heartbeat": "Heartbeat",
       "currentJob": "Current job",
       "desired": "Desired count",
