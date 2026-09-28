@@ -10,7 +10,8 @@
     "loadFailed": "Échec du chargement",
     "save": "Enregistrer",
     "saved": "Enregistré",
-    "comingSoon": "D'autres réglages arrivent bientôt."
+    "comingSoon": "D'autres réglages arrivent bientôt.",
+    "cancel": "Annuler"
   },
   "nav": {
     "why": "Pourquoi",
@@ -439,6 +440,126 @@
       "debugSystem": "Invite système",
       "debugMessages": "Messages envoyés",
       "debugFallback": "Repli écho (aucune clé/URL de base ai-proxy configurée)"
+    }
+  },
+  "marketplace": {
+    "title": "Marché",
+    "subtitle": "Achetez et vendez des biens et services à proximité. Démo conceptuelle v1.",
+    "disclaimer": "Aucun article illégal, volé ou dangereux. Les vendeurs sont responsables du respect des lois locales.",
+    "myListings": "Mes annonces",
+    "myOrders": "Mes commandes",
+    "newListing": "Nouvelle annonce",
+    "search": "Rechercher",
+    "searchPlaceholder": "Essayez « quelque chose pour un enfant à moins de 50 $ »…",
+    "empty": "Aucune annonce trouvée.",
+    "emptyHint": "Essayez une autre recherche ou un autre filtre.",
+    "notFound": "Annonce introuvable.",
+    "noDescription": "Aucune description fournie.",
+    "distanceAway": "à {{km}} km",
+    "ownListingHint": "Ceci est votre propre annonce.",
+    "soldHint": "Cet article a déjà été vendu.",
+    "flagged": "Signalée",
+    "edit": "Modifier",
+    "remove": "Retirer",
+    "filters": {
+      "anyKind": "Tout type",
+      "anyCategory": "Toute catégorie",
+      "anyCondition": "Tout état"
+    },
+    "kind": {
+      "good": "Article",
+      "service": "Service"
+    },
+    "condition": {
+      "new": "Neuf",
+      "like_new": "Comme neuf",
+      "good": "Bon",
+      "fair": "Correct",
+      "worn": "Usé"
+    },
+    "status": {
+      "draft": "Brouillon",
+      "active": "Active",
+      "sold": "Vendue",
+      "removed": "Retirée"
+    },
+    "category": {
+      "general": "Général",
+      "electronics": "Électronique",
+      "furniture": "Meubles",
+      "clothing": "Vêtements",
+      "kids_baby": "Enfants et bébés",
+      "tools": "Outils",
+      "sports_outdoors": "Sports et plein air",
+      "books_media": "Livres et médias",
+      "home_garden": "Maison et jardin",
+      "tickets_events": "Billets et événements",
+      "services_lessons": "Cours et tutorat",
+      "services_home": "Services à domicile",
+      "services_other": "Autres services",
+      "free": "Gratuit"
+    },
+    "payment": {
+      "cash": "Comptant",
+      "cashHint": "Organisez le paiement directement avec l'autre partie.",
+      "escrow": "Entiercement (simulé)",
+      "escrowHint": "Blocage simulé via Stripe Connect — aucun paiement réel.",
+      "escrowStubNotice": "Ceci est une simulation : aucun paiement réel n'est traité et aucun appel réseau Stripe n'est effectué.",
+      "stripe_escrow": "Entiercement (simulé)"
+    },
+    "escrowStatus": {
+      "none": "Aucun entiercement",
+      "held": "Bloqué",
+      "released": "Libéré",
+      "refunded": "Remboursé",
+      "disputed": "Contesté"
+    },
+    "orderStatus": {
+      "pending": "En attente",
+      "completed": "Terminée",
+      "canceled": "Annulée",
+      "disputed": "Contestée"
+    },
+    "buy": {
+      "title": "Acheter cette annonce",
+      "action": "Acheter",
+      "confirm": "Passer la commande",
+      "placed": "Commande passée.",
+      "notes": "Notes (facultatif)",
+      "notesPlaceholder": "ex. heure de récupération, lieu de rendez-vous…"
+    },
+    "report": {
+      "title": "Signaler l'annonce",
+      "action": "Signaler",
+      "hint": "Signalez cette annonce pour examen. Elle reste visible — la v1 n'a pas de file de modération.",
+      "reason": "Raison (facultatif)",
+      "reasonPlaceholder": "Qu'est-ce qui ne va pas avec cette annonce ?",
+      "submit": "Envoyer le signalement",
+      "done": "Merci, cette annonce a été signalée."
+    },
+    "form": {
+      "newTitle": "Nouvelle annonce",
+      "editTitle": "Modifier l'annonce",
+      "titleLabel": "Titre",
+      "descriptionLabel": "Description",
+      "categoryLabel": "Catégorie",
+      "conditionLabel": "État",
+      "priceLabel": "Prix (USD)",
+      "locationLabel": "Emplacement",
+      "locationPlaceholder": "ex. Brooklyn, NY",
+      "photosLabel": "Photos",
+      "addPhoto": "Ajouter",
+      "saveDraft": "Enregistrer le brouillon",
+      "publish": "Publier"
+    },
+    "myListingsEmpty": "Vous n'avez encore rien mis en vente.",
+    "orders": {
+      "buying": "Achats",
+      "selling": "Ventes",
+      "empty": "Aucune commande pour le moment.",
+      "release": "Libérer les fonds",
+      "refund": "Rembourser",
+      "dispute": "Contester"
     }
   }
 }

@@ -17,6 +17,9 @@ import type {
   ChatPostResponse,
   Connection,
   Me,
+  MarketplaceListing,
+  MarketplaceListingIn,
+  MarketplaceOrder,
   Task,
   Widget,
   Workspace,
@@ -168,6 +171,46 @@ export const api = {
     subscribe: (wsId: string, b: { price_id: string; coupon_code?: string | null }) =>
       post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/subscribe`, b),
     cancel: (wsId: string) => post<BillingSubscription>(`/api/workspaces/${encodeURIComponent(wsId)}/billing/cancel`),
+  },
+  marketplace: {
+    listings: (q?: {
+      kind?: string;
+      category?: string;
+      min_price_cents?: number;
+      max_price_cents?: number;
+      q?: string;
+      lat?: number;
+      lng?: number;
+      radius_km?: number;
+      limit?: number;
+    }) => get<{ listings: MarketplaceListing[] }>("/api/marketplace/listings", q),
+    search: (b: {
+      query?: string;
+      category?: string | null;
+      min_price_cents?: number | null;
+      max_price_cents?: number | null;
+      kind?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+      radius_km?: number | null;
+    }) => post<{ listings: MarketplaceListing[] }>("/api/marketplace/search", b),
+    get: (id: string) => get<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}`),
+    mine: () => get<{ listings: MarketplaceListing[] }>("/api/marketplace/mine"),
+    create: (b: MarketplaceListingIn) => post<MarketplaceListing>("/api/marketplace/listings", b),
+    update: (id: string, b: Partial<MarketplaceListingIn> & { photo_upload_ids?: string[] }) =>
+      patch<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}`, b),
+    publish: (id: string) => post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/publish`),
+    remove: (id: string) => post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/remove`),
+    report: (id: string, reason?: string) =>
+      post<MarketplaceListing>(`/api/marketplace/listings/${encodeURIComponent(id)}/report`, { reason }),
+    placeOrder: (listingId: string, b: { payment_method: string; notes?: string | null }) =>
+      post<MarketplaceOrder>(`/api/marketplace/listings/${encodeURIComponent(listingId)}/orders`, b),
+    myOrders: () => get<{ orders: MarketplaceOrder[] }>("/api/marketplace/orders/mine"),
+    getOrder: (id: string) => get<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}`),
+    releaseEscrow: (id: string) => post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/escrow/release`),
+    refundEscrow: (id: string) => post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/escrow/refund`),
+    disputeOrder: (id: string, reason?: string) =>
+      post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/dispute`, { reason }),
   },
   admin: {
     users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),

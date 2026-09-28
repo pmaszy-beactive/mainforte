@@ -120,6 +120,19 @@ EVENT_TYPES: dict[str, str] = {
     # system
     "system.error": "Unhandled error",
     "system.outbox.redispatched": "Outbox sweeper re-dispatched undelivered events",
+    # marketplace (v1, conceptual demo — IDEA.md:103)
+    "marketplace.listing.created": "Listing created (draft)",
+    "marketplace.listing.updated": "Listing edited",
+    "marketplace.listing.published": "Listing made active/visible",
+    "marketplace.listing.removed": "Listing taken down by its seller",
+    "marketplace.listing.sold": "Listing marked sold (order completed)",
+    "marketplace.listing.reported": "A user flagged a listing for review",
+    "marketplace.order.placed": "Buyer placed an order (cash or escrow)",
+    "marketplace.order.canceled": "Order canceled before completion",
+    "marketplace.escrow.held": "Stub: payment simulated as held in escrow",
+    "marketplace.escrow.released": "Stub: escrow funds simulated as released to seller",
+    "marketplace.escrow.refunded": "Stub: escrow funds simulated as refunded to buyer",
+    "marketplace.order.disputed": "Buyer or seller disputed an order",
 }
 
 

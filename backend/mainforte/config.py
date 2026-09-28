@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     stripe_publishable_key: str | None = Field(None, alias="VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY")
     stripe_webhook_secret: str | None = Field(None, alias="STRIPE_WEBHOOK_SECRET")
 
+    # Marketplace v1 (IDEA.md:103, conceptual demo). Escrow is stubbed only in this pass --
+    # marketplace_stripe_connect_enabled stays False until real Stripe Connect is designed, so
+    # stripe_connect_stub.py never makes a network call regardless of the billing keys above.
+    marketplace_application_fee_percent: int = Field(20, alias="MARKETPLACE_APPLICATION_FEE_PERCENT")
+    marketplace_stripe_connect_enabled: bool = Field(False, alias="MARKETPLACE_STRIPE_CONNECT_ENABLED")
+
     s3_endpoint: str | None = Field(None, alias="S3_ENDPOINT")
     s3_api_key: str | None = Field(None, alias="S3_API_KEY")
     s3_secret_key: str | None = Field(None, alias="S3_SECRET_KEY")

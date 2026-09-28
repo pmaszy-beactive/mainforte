@@ -15,6 +15,11 @@ const AppLayout = lazy(() => import("@/features/app/AppLayout"));
 const ChatPage = lazy(() => import("@/features/chat/ChatPage"));
 const SettingsPage = lazy(() => import("@/features/settings/SettingsPage"));
 const BillingPage = lazy(() => import("@/features/billing/BillingPage"));
+const MarketplaceBrowsePage = lazy(() => import("@/features/marketplace/MarketplaceBrowsePage"));
+const MarketplaceListingPage = lazy(() => import("@/features/marketplace/MarketplaceListingPage"));
+const MarketplaceNewListingPage = lazy(() => import("@/features/marketplace/MarketplaceNewListingPage"));
+const MyListingsPage = lazy(() => import("@/features/marketplace/MyListingsPage"));
+const MyOrdersPage = lazy(() => import("@/features/marketplace/MyOrdersPage"));
 const AdminLayout = lazy(() => import("@/features/admin/AdminLayout"));
 const SettingsTab = lazy(() => import("@/features/admin/tabs/SettingsTab"));
 const UsersTab = lazy(() => import("@/features/admin/tabs/UsersTab"));
@@ -47,6 +52,12 @@ export const router = createBrowserRouter([
               { index: true, element: <ChatPage /> },
               { path: "settings", element: <SettingsPage /> },
               { path: "billing", element: <BillingPage /> },
+              { path: "marketplace", element: <MarketplaceBrowsePage /> },
+              { path: "marketplace/new", element: <MarketplaceNewListingPage /> },
+              { path: "marketplace/mine", element: <MyListingsPage /> },
+              { path: "marketplace/orders", element: <MyOrdersPage /> },
+              { path: "marketplace/:id", element: <MarketplaceListingPage /> },
+              { path: "marketplace/:id/edit", element: <MarketplaceNewListingPage /> },
             ],
           },
           {

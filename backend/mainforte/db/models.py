@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -369,3 +369,79 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------- marketplace (v1, conceptual demo)
+
+
+class Listing(IdMixin, TimestampMixin, Base):
+    """Something a user is selling: a good or a small gig/service (piano lessons, etc). Global,
+    per-user — not workspace-scoped like everything else; ws_id is kept only for event-log
+    bookkeeping (IDEA.md:103). `text_fts` (title+description) is added by the migration only,
+    never ORM-mapped here — same treatment as Event.text_fts."""
+
+    __tablename__ = "listings"
+    __table_args__ = (
+        Index("ix_listings_status_kind", "status", "kind", "created_at"),
+        Index("ix_listings_seller", "seller_user_id", "status"),
+    )
+
+    seller_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ws_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id", ondelete="SET NULL"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # good | service
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(40), nullable=False)  # allowlist, validated in routes.py
+    condition: Mapped[str | None] = mapped_column(String(20))  # new|like_new|good|fair|worn — goods only
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="usd", nullable=False)
+    location_label: Mapped[str | None] = mapped_column(String(200))
+    lat: Mapped[float | None] = mapped_column(Float)
+    lng: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)  # draft|active|sold|removed
+    flagged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    report_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    photos: Mapped[list["ListingPhoto"]] = relationship(back_populates="listing", cascade="all, delete-orphan")
+
+
+class ListingPhoto(IdMixin, Base):
+    """A photo attached to a listing, pointing at an Upload created via the existing chat uploads
+    endpoint — no separate upload path for marketplace photos."""
+
+    __tablename__ = "listing_photos"
+    __table_args__ = (UniqueConstraint("listing_id", "upload_id", name="uq_listing_photo"),)
+
+    listing_id: Mapped[str] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), nullable=False, index=True)
+    upload_id: Mapped[str] = mapped_column(ForeignKey("uploads.id", ondelete="CASCADE"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    listing: Mapped[Listing] = relationship(back_populates="photos")
+
+
+class Order(IdMixin, TimestampMixin, Base):
+    """A buyer's order against a listing, cash or stubbed Stripe escrow (never a real charge in
+    v1 — see marketplace/stripe_connect_stub.py). amount/fee are snapshotted at creation so a
+    later price edit on the listing can't retroactively change a completed order."""
+
+    __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_listing", "listing_id", "status"),
+        Index("ix_orders_buyer", "buyer_user_id", "status"),
+    )
+
+    listing_id: Mapped[str] = mapped_column(ForeignKey("listings.id", ondelete="RESTRICT"), nullable=False, index=True)
+    buyer_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    seller_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)  # snapshot of listing.price_cents
+    application_fee_cents: Mapped[int] = mapped_column(Integer, nullable=False)  # our 20% cut, computed at creation
+    currency: Mapped[str] = mapped_column(String(10), default="usd", nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # cash | stripe_escrow
+    # none|held|released|refunded|disputed
+    escrow_status: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)  # pending|completed|canceled|disputed
+    # stub-only fields, always fake ids in v1 — present so a later real-integration swap needs no migration
+    stripe_transfer_id: Mapped[str | None] = mapped_column(String(64))
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(64))
+    notes: Mapped[str | None] = mapped_column(Text)  # e.g. cash meet-up arrangement

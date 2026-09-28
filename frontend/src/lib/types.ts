@@ -286,3 +286,88 @@ export interface BillingState {
   subscription: BillingSubscription | null;
   has_card: boolean;
 }
+
+/* Marketplace (v1, conceptual demo — IDEA.md:103) */
+export type ListingKind = "good" | "service";
+export type ListingCondition = "new" | "like_new" | "good" | "fair" | "worn";
+export type ListingStatus = "draft" | "active" | "sold" | "removed";
+export type ListingCategory =
+  | "general"
+  | "electronics"
+  | "furniture"
+  | "clothing"
+  | "kids_baby"
+  | "tools"
+  | "sports_outdoors"
+  | "books_media"
+  | "home_garden"
+  | "tickets_events"
+  | "services_lessons"
+  | "services_home"
+  | "services_other"
+  | "free";
+
+export interface MarketplaceListingPhoto {
+  id: string;
+  upload_id: string;
+  sort_order: number;
+}
+
+export interface MarketplaceListing {
+  id: string;
+  seller_user_id: string;
+  kind: ListingKind;
+  title: string;
+  description: string;
+  category: ListingCategory;
+  condition: ListingCondition | null;
+  price_cents: number;
+  currency: string;
+  location_label: string | null;
+  lat: number | null;
+  lng: number | null;
+  status: ListingStatus;
+  flagged: boolean;
+  report_count: number;
+  photos: MarketplaceListingPhoto[];
+  created_at: string;
+  updated_at: string;
+  /** Present only on radius-filtered search/browse results. */
+  distance_km?: number;
+}
+
+export interface MarketplaceListingIn {
+  kind: ListingKind;
+  title: string;
+  description?: string;
+  category: ListingCategory;
+  condition?: ListingCondition | null;
+  price_cents: number;
+  currency?: string;
+  location_label?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  /** Recorded on the listing for event-log bookkeeping only (not an access boundary) — also the
+   * workspace whose upload endpoint listing photos are stored under. */
+  ws_id?: string | null;
+}
+
+export type MarketplacePaymentMethod = "cash" | "stripe_escrow";
+export type MarketplaceEscrowStatus = "none" | "held" | "released" | "refunded" | "disputed";
+export type MarketplaceOrderStatus = "pending" | "completed" | "canceled" | "disputed";
+
+export interface MarketplaceOrder {
+  id: string;
+  listing_id: string;
+  buyer_user_id: string;
+  seller_user_id: string;
+  amount_cents: number;
+  application_fee_cents: number;
+  currency: string;
+  payment_method: MarketplacePaymentMethod;
+  escrow_status: MarketplaceEscrowStatus;
+  status: MarketplaceOrderStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
