@@ -322,6 +322,14 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     # A previously-draining worker becomes destroyable once idle, regardless of the count branches
     # below — this runs every tick so a worker that finishes its in-flight job gets torn down
     # promptly rather than waiting for the next live/desired mismatch.
+    #
+    # destroy-worker.sh runs synchronously over SSH (stop+rm, then returns) — by the time
+    # trigger_jenkins_build reports ok, the container is already gone. The AgentWorker row must be
+    # deleted right here: nothing else ever removes it, and leaving it behind (even as
+    # "draining") means it keeps winning idle_draining[0] forever, re-triggering a no-op destroy
+    # against an already-gone container on every single tick while every other drained worker
+    # behind it in the list never gets a turn. (This is exactly what happened to worker #1 /
+    # sandbox-1 across three version bumps -- see incident notes.)
     idle_draining = [w for w in draining if _worker_is_idle(w)]
     if idle_draining:
         victim = idle_draining[0]
@@ -329,9 +337,11 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         if not result.get("ok"):
             log.warning("reconcile_agent_workers[%s]: destroy trigger failed for draining %s: %s",
                         pool, victim.container_name, result.get("reason"))
-        else:
-            emit(db, "worker.destroying", ws_id=None, actor=("system", None),
-                 payload={"container_name": victim.container_name, "pool": pool})
+            return {"ok": True, "live": live, "desired": desired, "action": "destroy_drained_failed",
+                    "container_name": victim.container_name}
+        db.delete(victim)
+        emit(db, "worker.destroying", ws_id=None, actor=("system", None),
+             payload={"container_name": victim.container_name, "pool": pool})
         return {"ok": True, "live": live, "desired": desired, "action": "destroy_drained", "container_name": victim.container_name}
 
     if live == desired:
@@ -341,7 +351,9 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         return _provision(db, s, pool, cfg, managed, to_add=min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK))
 
     # live > desired, no version drift: destroy the newest-named non-draining workers first, never
-    # worker #1 (excluded by prefix match).
+    # worker #1 (excluded by prefix match). Same as the idle_draining branch above: the row must
+    # be deleted once the (synchronous) destroy trigger succeeds, or it lingers and gets
+    # re-selected forever.
     candidates = [w for w in reversed(managed) if w.status != "draining"]
     to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
     victims = candidates[:to_remove]
@@ -351,6 +363,7 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         if not result.get("ok"):
             log.warning("reconcile_agent_workers[%s]: destroy trigger failed for %s: %s", pool, w.container_name, result.get("reason"))
             continue
+        db.delete(w)
         emit(db, "worker.destroying", ws_id=None, actor=("system", None),
              payload={"container_name": w.container_name, "pool": pool})
         n += 1

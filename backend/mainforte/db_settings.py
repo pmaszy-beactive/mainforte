@@ -31,6 +31,31 @@ BASTION_JENKINS_FIELDS: dict[str, tuple[str, bool]] = {
     "jenkins.ssh_key": ("jenkins_ssh_key", True),
     "jenkins.provision_job": ("jenkins_provision_job", False),
     "jenkins.destroy_job": ("jenkins_destroy_job", False),
+    # Sites feature (PLAN.md "Sites"): a *separate* pair of jobs from the worker-pool ones above —
+    # provisions a per-tenant site container (full Node.js frontend+backend app), not a pooled
+    # agent worker. Deliberately new job names rather than reusing beactive-claw's existing
+    # website_builder_jenkins_job/website_builder_haproxy_job: those report status into
+    # beactive-claw's own DB via a JWT/callback contract mainforte doesn't own. These jobs are
+    # mainforte's own pipeline-as-code (same shared Jenkins/bastion host, confirmed reusable
+    # as-is — trigger_jenkins_build needed zero changes) that calls back into mainforte's own
+    # sites/provisioning.py callback route, with mainforte's Event log as the system of record.
+    "jenkins.site_provision_job": ("jenkins_site_provision_job", False),
+    "jenkins.site_destroy_job": ("jenkins_site_destroy_job", False),
+    # Admin/superuser Postgres credential the site-provisioning Jenkins job uses to run
+    # /etc/backbone/scripts/bootstrap-db.sh (creates each site's own DB role + database on the
+    # same shared Postgres cluster mainforte's own DB lives on -- see PLAN.md's "Per-site Postgres
+    # provisioning" section). The Jenkins job is the only thing that ever needs *admin* creds;
+    # mainforte's backend process connects to a site's own database using that site's own
+    # non-admin role (Site.db_password_encrypted + the deterministic site_{slug} name, see
+    # sites/provisioning.py's site_database_url()), never this admin credential.
+    "db.admin_user": ("db_admin_user", False),
+    "db.admin_password": ("db_admin_password", True),
+    # Host/port of the shared Postgres cluster sites' own databases live on -- same cluster
+    # deploy-site.sh's DB_HOST/DB_PORT defaults point at, kept here too so mainforte's backend
+    # (site_database_url() below) reconstructs the exact same connection target rather than a
+    # second hardcoded guess. Falls back to deploy-site.sh's own defaults if unset.
+    "db.sites_host": ("db_sites_host", False),
+    "db.sites_port": ("db_sites_port", False),
     # Not bastion/Jenkins config, but same admin-editable-per-environment need: the URL a
     # freshly-provisioned worker calls back to. This is mainforte's own public URL (e.g.
     # https://www.mainforte.ai in UAT), not backbone's -- falls back to config.py's

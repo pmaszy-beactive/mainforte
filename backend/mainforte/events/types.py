@@ -18,11 +18,13 @@ EVENT_TYPES: dict[str, str] = {
     "user.updated": "User profile updated",
     "user.password.reset_requested": "Password reset email requested",
     "user.password.reset": "Password was reset",
+    "user.prefs.updated": "User's stored preferences (interaction style, concierge name, etc.) changed",
     # workspace
     "workspace.created": "Workspace created",
     "workspace.member.added": "Member added to workspace",
     "workspace.member.removed": "Member removed from workspace",
     "workspace.plan.changed": "Workspace plan changed",
+    "workspace.reset": "Workspace wiped and reseeded back to a fresh state",
     # billing
     "billing.card.saved": "Payment method saved",
     "billing.subscription.created": "Subscription created",
@@ -108,6 +110,17 @@ EVENT_TYPES: dict[str, str] = {
     "widget.published": "Widget published",
     "widget.viewed": "Widget viewed",
     "widget.disabled": "Widget disabled",
+    # site (chat-built, live-editable, publishable business web app — full Node.js app, not a
+    # static widget bundle; see db/models.py's Site docstring). Build progress reuses the generic
+    # build.* namespace above (build.started/log/succeeded/failed) rather than a parallel
+    # site.build.* — these events are site-lifecycle-specific on top of that.
+    "site.created": "Site created from a chat description; provisioning started",
+    "site.provisioning": "Jenkins job triggered to provision the site's container",
+    "site.ready": "Site's container is live and reachable at its preview URL",
+    "site.file.changed": "The chat agent edited a file in the site's live workspace",
+    "site.error": "Site provisioning or a live edit failed (see admin/debug surfaces, never shown raw to the user)",
+    "site.published": "Site made live on its permanent subdomain",
+    "site.destroyed": "Site's container was torn down",
     # worker
     "worker.online": "Agent worker online",
     "worker.offline": "Agent worker offline",

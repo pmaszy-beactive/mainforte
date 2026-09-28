@@ -1,12 +1,18 @@
 """Object storage: backbone s3-proxy (Bearer auth) with a local-disk fallback for dev.
 
 Backbone facts (s3_proxy.py): keys are namespaced per app under storage/<slug>/, GET reads whole objects
-into memory (no Range), no batch delete, keys <= ~950 chars and no '..'.
+into memory (no Range), no batch delete, keys <= ~950 chars and no '..'. The underlying s3-proxy
+*does* support prefix listing (GET on the bucket root with a `prefix` param, `_handle_list`) — this
+`Storage` class just doesn't wrap that endpoint today (nothing here has needed it yet; homes.py's
+snapshot index and the site-source layout below both use their own small index/manifest objects
+instead of a bucket listing).
 """
 from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -112,3 +118,42 @@ def upload_key(user_id: str, upload_id: str, name: str) -> str:
 
 def widget_key(user_id: str, slug: str, version: int, filename: str) -> str:
     return f"users/{user_id}/widgets/{slug}/{version}/{filename}"
+
+
+def site_source_key(site_id: str, version: int) -> str:
+    return f"sites/{site_id}/source/{version}.tar.zst"
+
+
+def site_source_latest_key(site_id: str) -> str:
+    return f"sites/{site_id}/source/latest.json"
+
+
+# ---------------------------------------------------------------- tar.zst directory sync
+#
+# Promoted out of homes.py, which established this exact pattern first (sync a whole directory
+# tree through this module's single-object PUT/GET interface, PLAN.md's Sites "Live editing"
+# section §"S3 object shape") — sites/source.py is the second real call site. homes.py still
+# defines its own `_tar_dir`/`_untar_bytes` too; not worth a disruptive rename of a shipped module
+# just to import these instead, but any third caller should import from here rather than adding a
+# third copy.
+
+
+def tar_dir(src: Path, *, exclude: tuple[str, ...] = ()) -> bytes:
+    """Deterministic-enough tar.zst of `src`'s contents (not `src` itself) as bytes, via a temp
+    file — `tarfile` has no zstd filter, so we shell out to `tar` (present in both the worker
+    image and local dev macOS) rather than pull in a zstd binding."""
+    with tempfile.NamedTemporaryFile(suffix=".tar.zst") as tmp:
+        argv = ["tar", "--zstd", "-cf", tmp.name, "-C", str(src)]
+        for e in exclude:
+            argv += ["--exclude", e]
+        argv.append(".")
+        subprocess.run(argv, check=True, capture_output=True, text=True)
+        return Path(tmp.name).read_bytes()
+
+
+def untar_bytes(data: bytes, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".tar.zst") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        subprocess.run(["tar", "--zstd", "-xf", tmp.name, "-C", str(dest)], check=True, capture_output=True, text=True)

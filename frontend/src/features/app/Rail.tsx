@@ -1,5 +1,5 @@
-import { Link, useLocation } from "react-router";
-import { PanelLeftClose, PanelLeftOpen, Store } from "lucide-react";
+import { Link } from "react-router";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/cn";
 import { useUi } from "@/stores/ui";
@@ -13,8 +13,6 @@ export function Rail() {
   const { t } = useTranslation();
   const collapsed = useUi((s) => s.railCollapsed);
   const toggle = useUi((s) => s.toggleRail);
-  const location = useLocation();
-  const marketplaceActive = location.pathname.startsWith("/app/marketplace");
 
   return (
     <aside
@@ -44,20 +42,8 @@ export function Rail() {
           <LanguageSelect collapsed={collapsed} />
         </div>
       )}
-      <div className="px-2 pt-2">
-        <Link
-          to="/app/marketplace"
-          title={collapsed ? t("marketplace.title") : undefined}
-          className={cn(
-            "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm transition ring-focus",
-            marketplaceActive ? "bg-ember-500/10 text-ember-300 ring-1 ring-ember-500/20" : "text-fog-300 hover:bg-white/5 hover:text-fog-100",
-            collapsed && "justify-center",
-          )}
-        >
-          <Store className="size-4 shrink-0" />
-          {!collapsed && <span className="flex-1 truncate">{t("marketplace.title")}</span>}
-        </Link>
-      </div>
+      {/* Marketplace nav entry hidden for now (v1 conceptual demo, not ready to surface) —
+          routes/backend are untouched, just not linked from nav. Re-add this block to unhide. */}
       <div className="flex-1 space-y-5 overflow-y-auto px-2 py-3">
         <WidgetsSection collapsed={collapsed} />
         <StaffSection collapsed={collapsed} />

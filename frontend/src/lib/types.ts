@@ -175,6 +175,24 @@ export interface AdminWorkers {
     current_job: string | null;
   }[];
 }
+export interface AdminSites {
+  sites: {
+    id: string;
+    name: string;
+    slug: string;
+    ws_id: string;
+    workspace_name: string;
+    owner_id: string;
+    status: string;
+    stage: string;
+    container_name: string | null;
+    dev_port: number | null;
+    last_error: string | null;
+    source_version: number;
+    created_at: string;
+    published_at: string | null;
+  }[];
+}
 export interface AdminTaskSummary {
   id: string;
   ws_id: string;

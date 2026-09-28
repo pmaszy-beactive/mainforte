@@ -28,6 +28,13 @@
 #   DATABASE_URL          — mainforte has its own dedicated Postgres (unlike
 #                            Redis/RabbitMQ below, it is not backbone-shared),
 #                            so this is just forwarded into the container.
+#   AI_PROXY_BASE_URL, AI_PROXY_ADMIN_SECRET  — ai-proxy config. mainforte-app
+#                            gets these from the same deploy host's env; workers
+#                            need them too (aiproxy.keys.get_or_mint runs inside
+#                            worker containers, via route_message/onboard_workspace
+#                            — see tasks/work.py, events/onboarding.py) or
+#                            aiproxy.enabled() is False in-worker and chat silently
+#                            falls back to the "no AI backend configured" echo.
 #   POSTGRES_ADMIN_USER/PASS   — backbone's admin Postgres creds, used only to
 #                            read (never write) deploy_app_state for the
 #                            already-provisioned redis_db/rabbit_pass. Same
@@ -122,6 +129,12 @@ if [ -n "$CELERY_QUEUES" ]; then
 fi
 if [ -n "${DATABASE_URL:-}" ]; then
     ENV_ARGS+=(-e "DATABASE_URL=$DATABASE_URL")
+fi
+if [ -n "${AI_PROXY_BASE_URL:-}" ]; then
+    ENV_ARGS+=(-e "AI_PROXY_BASE_URL=$AI_PROXY_BASE_URL")
+fi
+if [ -n "${AI_PROXY_ADMIN_SECRET:-}" ]; then
+    ENV_ARGS+=(-e "AI_PROXY_ADMIN_SECRET=$AI_PROXY_ADMIN_SECRET")
 fi
 if [ -n "$RESOLVED_REDIS_URL" ]; then
     ENV_ARGS+=(-e "REDIS_URL=$RESOLVED_REDIS_URL")

@@ -300,6 +300,7 @@
       "tasks": "Tâches d'agent",
       "work-log": "Registre de travail",
       "workers": "Travailleurs",
+      "sites": "Sites",
       "events": "Événements"
     },
     "settings": {
@@ -399,6 +400,18 @@
       "fullPool": "Bassin complet (chat, work, system)",
       "sandboxPool": "Bassin sandbox (work seulement)",
       "notConfigured": "La mise à l'échelle automatique des travailleurs n'est pas configurée (paramètres Jenkins/bastion manquants) — les nombres souhaités sont enregistrés mais ne provisionneront ni ne détruiront de travailleurs.",
+      "destroy": "Détruire",
+      "confirmDestroy": "Confirmer ?"
+    },
+    "sites": {
+      "name": "Site",
+      "workspace": "Espace de travail",
+      "status": "État",
+      "stage": "Étape",
+      "sourceVersion": "Version",
+      "created": "Créé",
+      "lastError": "Dernière erreur",
+      "empty": "Aucun site.",
       "destroy": "Détruire",
       "confirmDestroy": "Confirmer ?"
     },

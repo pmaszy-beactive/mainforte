@@ -5,6 +5,7 @@ import type {
   AdminFinances,
   AdminJobs,
   AdminScheduledJobs,
+  AdminSites,
   AdminTaskDetail,
   AdminTasks,
   AdminUser,
@@ -226,6 +227,9 @@ export const api = {
     setDesiredWorkers: (count: number) => post<void>("/api/admin/workers/desired", { count }),
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
     destroyWorker: (id: string) => post<{ ok: boolean; container_name: string }>(`/api/admin/workers/${encodeURIComponent(id)}/destroy`),
+    sites: () => get<AdminSites>("/api/admin/sites"),
+    destroySite: (id: string) =>
+      post<{ ok: boolean; site_id: string; container_name: string | null }>(`/api/admin/sites/${encodeURIComponent(id)}/destroy`),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
     workLog: () => get<AdminWorkLog>("/api/admin/work-log"),

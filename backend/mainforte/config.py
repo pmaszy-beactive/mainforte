@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     jenkins_ssh_key_path: str | None = Field(None, alias="JENKINS_SSH_KEY_PATH")
     jenkins_provision_job: str | None = Field(None, alias="JENKINS_PROVISION_JOB")
     jenkins_destroy_job: str | None = Field(None, alias="JENKINS_DESTROY_JOB")
+    # Sites feature (PLAN.md "Sites") -- a separate pair of jobs from the worker-pool ones above,
+    # same shared Jenkins host, deliberately different names so both kinds of job can run
+    # concurrently without one queueing behind the other (Jenkins serializes same-named builds by
+    # default). See db_settings.py's BASTION_JENKINS_FIELDS comment for the "jenkins.site_*"
+    # Setting-key override these fall back from.
+    jenkins_site_provision_job: str | None = Field(None, alias="JENKINS_SITE_PROVISION_JOB")
+    jenkins_site_destroy_job: str | None = Field(None, alias="JENKINS_SITE_DESTROY_JOB")
 
     bastion_host: str | None = Field(None, alias="BASTION_HOST")
     bastion_port: int = Field(22, alias="BASTION_PORT")

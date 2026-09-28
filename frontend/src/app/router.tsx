@@ -29,6 +29,7 @@ const JobsTab = lazy(() => import("@/features/admin/tabs/JobsTab"));
 const TasksTab = lazy(() => import("@/features/admin/tabs/TasksTab"));
 const WorkLogTab = lazy(() => import("@/features/admin/tabs/WorkLogTab"));
 const WorkersTab = lazy(() => import("@/features/admin/tabs/WorkersTab"));
+const SitesTab = lazy(() => import("@/features/admin/tabs/SitesTab"));
 const EventsTab = lazy(() => import("@/features/admin/tabs/EventsTab"));
 
 export const router = createBrowserRouter([
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
                   { path: "tasks", element: <TasksTab /> },
                   { path: "work-log", element: <WorkLogTab /> },
                   { path: "workers", element: <WorkersTab /> },
+                  { path: "sites", element: <SitesTab /> },
                   { path: "events", element: <EventsTab /> },
                 ],
               },
