@@ -398,7 +398,9 @@
       "sandboxDesired": "Sandbox pool desired count",
       "fullPool": "Full pool (chat, work, system)",
       "sandboxPool": "Sandbox pool (work only)",
-      "notConfigured": "Worker auto-scaling is not configured (missing Jenkins/bastion settings) — desired counts are saved but will not provision or destroy workers."
+      "notConfigured": "Worker auto-scaling is not configured (missing Jenkins/bastion settings) — desired counts are saved but will not provision or destroy workers.",
+      "destroy": "Destroy",
+      "confirmDestroy": "Confirm?"
     },
     "workLog": {
       "started": "Started",
