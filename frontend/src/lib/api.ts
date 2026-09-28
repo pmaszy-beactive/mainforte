@@ -225,6 +225,7 @@ export const api = {
     workers: () => get<AdminWorkers>("/api/admin/workers"),
     setDesiredWorkers: (count: number) => post<void>("/api/admin/workers/desired", { count }),
     setDesiredSandboxWorkers: (count: number) => post<void>("/api/admin/workers/desired/sandbox", { count }),
+    destroyWorker: (id: string) => post<{ ok: boolean; container_name: string }>(`/api/admin/workers/${encodeURIComponent(id)}/destroy`),
     events: (q: { type?: string; workspace_id?: string; limit?: number }) =>
       get<{ events: WsEvent[] }>("/api/admin/events", q),
     workLog: () => get<AdminWorkLog>("/api/admin/work-log"),

@@ -83,6 +83,9 @@ export default function WorkersTab() {
   const save = useMutation({ mutationFn: api.admin.setDesiredWorkers, onSuccess: invalidate });
   const saveSandbox = useMutation({ mutationFn: api.admin.setDesiredSandboxWorkers, onSuccess: invalidate });
 
+  const destroy = useMutation({ mutationFn: api.admin.destroyWorker, onSuccess: invalidate });
+  const [armedId, setArmedId] = useState<string | null>(null);
+
   const isSandbox = (w: Worker) => w.container_name.includes("-sandbox-");
   const liveFull = q.data?.workers.filter((w) => !isSandbox(w)).length ?? 0;
   const liveSandbox = q.data?.workers.filter(isSandbox).length ?? 0;
@@ -97,33 +100,60 @@ export default function WorkersTab() {
     { key: "version", header: t("admin.workers.version"), render: (w) => <span className="font-mono text-xs">{w.version ?? "—"}</span> },
     { key: "hb", header: t("admin.workers.heartbeat"), render: (w) => <span className="text-fog-500">{f.relative(w.last_heartbeat)}</span> },
     { key: "job", header: t("admin.workers.currentJob"), render: (w) => <span className="font-mono text-xs text-fog-500">{w.current_job ?? "—"}</span> },
+    {
+      key: "actions",
+      header: "",
+      render: (w) => {
+        const armed = armedId === w.id;
+        return (
+          <Button
+            size="sm"
+            variant="danger"
+            loading={destroy.isPending && destroy.variables === w.id}
+            onClick={() => {
+              if (armed) {
+                destroy.mutate(w.id);
+                setArmedId(null);
+              } else {
+                setArmedId(w.id);
+              }
+            }}
+          >
+            {armed ? t("admin.workers.confirmDestroy") : t("admin.workers.destroy")}
+          </Button>
+        );
+      },
+    },
   ];
 
   return (
     <div className="space-y-4">
       {q.data && !q.data.reconciler_configured && <Alert tone="info">{t("admin.workers.notConfigured")}</Alert>}
-      <PoolControl
-        label={t("admin.workers.fullPool")}
-        live={liveFull}
-        value={desired}
-        onChange={setDesired}
-        onSave={() => save.mutate(desired)}
-        saving={save.isPending}
-        dirty={q.data?.pools.full !== desired}
-        saved={save.isSuccess}
-        error={save.error}
-      />
-      <PoolControl
-        label={t("admin.workers.sandboxPool")}
-        live={liveSandbox}
-        value={sandboxDesired}
-        onChange={setSandboxDesired}
-        onSave={() => saveSandbox.mutate(sandboxDesired)}
-        saving={saveSandbox.isPending}
-        dirty={q.data?.pools.sandbox !== sandboxDesired}
-        saved={saveSandbox.isSuccess}
-        error={saveSandbox.error}
-      />
+      <div className="flex flex-wrap gap-4">
+        <PoolControl
+          label={t("admin.workers.fullPool")}
+          live={liveFull}
+          value={desired}
+          onChange={setDesired}
+          onSave={() => save.mutate(desired)}
+          saving={save.isPending}
+          dirty={q.data?.pools.full !== desired}
+          saved={save.isSuccess}
+          error={save.error}
+        />
+        <PoolControl
+          label={t("admin.workers.sandboxPool")}
+          live={liveSandbox}
+          value={sandboxDesired}
+          onChange={setSandboxDesired}
+          onSave={() => saveSandbox.mutate(sandboxDesired)}
+          saving={saveSandbox.isPending}
+          dirty={q.data?.pools.sandbox !== sandboxDesired}
+          saved={saveSandbox.isSuccess}
+          error={saveSandbox.error}
+        />
+      </div>
+      {destroy.isError && <Alert tone="error">{destroy.error.message}</Alert>}
       <Table columns={columns} rows={q.data?.workers} rowKey={(w) => w.id} loading={q.isLoading} error={q.error} empty={t("admin.workers.empty")} />
     </div>
   );

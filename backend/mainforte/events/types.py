@@ -116,6 +116,7 @@ EVENT_TYPES: dict[str, str] = {
     "worker.home.staged": "Worker staged a user home from S3",
     "worker.home.synced": "Worker synced a user home to S3",
     "worker.provisioning": "Reconciler triggered a Jenkins job to provision a worker",
+    "worker.draining": "Reconciler told a worker to stop taking new tasks before teardown",
     "worker.destroying": "Reconciler triggered a Jenkins job to destroy a worker",
     # system
     "system.error": "Unhandled error",

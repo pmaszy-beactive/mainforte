@@ -338,6 +338,31 @@ def set_desired_sandbox(body: DesiredIn, ident: Identity = Depends(require_super
     return _set_pool_desired(db, "sandbox", body.count, ident)
 
 
+@router.post("/workers/{worker_id}/destroy")
+def destroy_worker(worker_id: str, ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
+    """Force-triggers jenkins_destroy_job for one worker regardless of drain/idle state — the manual
+    escape hatch for a worker stuck in "draining" that never reports current_job=None (dead
+    heartbeat, wedged job, or a container that's already gone) and so would otherwise never be
+    picked up by reconcile_agent_workers' own idle_draining check (tasks/system.py). Unlike that
+    reconciler path, this does not require the worker to be draining or idle first."""
+    from mainforte.db_settings import get_bastion_jenkins_config
+    from mainforte.events import emit
+    from mainforte.jenkins_ssh import trigger_jenkins_build
+
+    w = db.get(AgentWorker, worker_id)
+    if not w:
+        raise HTTPException(404, "worker not found")
+
+    s = get_bastion_jenkins_config(db)
+    result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
+    if not result.get("ok"):
+        raise HTTPException(502, f"Jenkins destroy trigger failed: {result.get('reason')}")
+
+    emit(db, "worker.destroying", ws_id=None, actor=("user", ident.real_user.id),
+         payload={"container_name": w.container_name, "pool": "manual", "by": ident.real_user.email})
+    return {"ok": True, "container_name": w.container_name}
+
+
 def _set_pool_desired(db: Session, pool_field: str, count: int, ident: Identity) -> dict:
     from mainforte.tasks.system import WORKERS_DESIRED_KEY, get_pool_desired_counts
 
