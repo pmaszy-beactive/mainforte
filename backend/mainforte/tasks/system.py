@@ -313,7 +313,20 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     # Rolling replace: some live worker is running an older build than this reconciler's own
     # process — i.e. a redeploy happened. Handled before the plain count-based branches below so
     # a version bump doesn't need a separate desired-count bump to kick off a swap.
-    outdated = [w for w in live_workers if w.status != "draining" and w.version and w.version != __version__]
+    #
+    # A worker provisioned within the last AGENT_WORKER_PROVISION_GRACE_SECONDS is exempt from
+    # being classified outdated even if its version doesn't match yet: it still counts toward
+    # `live`/`current_count` once it heartbeats, but it gets the rest of its grace window to catch
+    # up before it's eligible for drain. Without this, a worker that registers (first heartbeat)
+    # before a stale/lagging version tag propagates gets immediately drained and destroyed, its
+    # replacement repeats the same race, and the pool churns forever instead of settling -- this is
+    # the bug the debug logging above was added to confirm.
+    recently_provisioned = _recently_provisioned_names(db, cfg["prefix"])
+    outdated = [
+        w for w in live_workers
+        if w.status != "draining" and w.version and w.version != __version__
+        and w.container_name not in recently_provisioned
+    ]
     draining = [w for w in live_workers if w.status == "draining"]
 
     if outdated:
@@ -321,7 +334,7 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
             "reconcile_agent_workers[%s]: outdated=%s (each: worker_version != reconciler_version=%s) "
             "provisioning_events_last_%ss=%s",
             pool, [(w.container_name, w.version) for w in outdated], __version__,
-            AGENT_WORKER_PROVISION_GRACE_SECONDS, sorted(_recently_provisioned_names(db, cfg["prefix"])),
+            AGENT_WORKER_PROVISION_GRACE_SECONDS, sorted(recently_provisioned),
         )
 
     if outdated and live >= desired:
@@ -387,7 +400,11 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     # worker #1 (excluded by prefix match). Same as the idle_draining branch above: the row must
     # be deleted once the (synchronous) destroy trigger succeeds, or it lingers and gets
     # re-selected forever.
-    candidates = [w for w in reversed(managed) if w.status != "draining"]
+    #
+    # Exclude workers still inside their provisioning grace window: a worker that just heartbeated
+    # for the first time (bumping live above desired transiently) shouldn't be torn down before it
+    # ever gets used, only to have the reconciler provision a replacement for it next tick.
+    candidates = [w for w in reversed(managed) if w.status != "draining" and w.container_name not in recently_provisioned]
     to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
     victims = candidates[:to_remove]
     log.info(
