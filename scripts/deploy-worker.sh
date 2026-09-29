@@ -28,13 +28,20 @@
 #   DATABASE_URL          — mainforte has its own dedicated Postgres (unlike
 #                            Redis/RabbitMQ below, it is not backbone-shared),
 #                            so this is just forwarded into the container.
-#   AI_PROXY_BASE_URL, AI_PROXY_ADMIN_SECRET  — ai-proxy config. mainforte-app
-#                            gets these from the same deploy host's env; workers
-#                            need them too (aiproxy.keys.get_or_mint runs inside
+#   AI_PROXY_BASE_URL, AI_PROXY_ADMIN_SECRET  — ai-proxy config, REQUIRED (this
+#                            script aborts if either is missing from the deploy
+#                            host's env). Do not assume mainforte-app's own
+#                            container already has these some other way — that
+#                            assumption was wrong in practice (confirmed via
+#                            `docker exec mainforte-app-... env | grep AI_PROXY`
+#                            coming back empty in prod) and is exactly what let
+#                            this gap go unnoticed. Workers need them explicitly
+#                            forwarded (aiproxy.keys.get_or_mint runs inside
 #                            worker containers, via route_message/onboard_workspace
-#                            — see tasks/work.py, events/onboarding.py) or
-#                            aiproxy.enabled() is False in-worker and chat silently
-#                            falls back to the "no AI backend configured" echo.
+#                            — see tasks/work.py, events/onboarding.py); without
+#                            them aiproxy.enabled() is False in-worker and chat
+#                            silently falls back to the "no AI backend configured"
+#                            echo.
 #   POSTGRES_ADMIN_USER/PASS   — backbone's admin Postgres creds, used only to
 #                            read (never write) deploy_app_state for the
 #                            already-provisioned redis_db/rabbit_pass. Same
@@ -56,6 +63,8 @@ set -euo pipefail
 
 : "${WORKER_NAME:?WORKER_NAME is required}"
 : "${API_URL:?API_URL is required}"
+: "${AI_PROXY_BASE_URL:?AI_PROXY_BASE_URL is required — worker containers need it or chat silently falls back to the no-AI-backend echo (see aiproxy.enabled())}"
+: "${AI_PROXY_ADMIN_SECRET:?AI_PROXY_ADMIN_SECRET is required — worker containers need it or chat silently falls back to the no-AI-backend echo (see aiproxy.enabled())}"
 CELERY_QUEUES="${CELERY_QUEUES:-}"
 
 MAINFORTE_SLUG="${MAINFORTE_SLUG:-mainforte}"
@@ -130,12 +139,7 @@ fi
 if [ -n "${DATABASE_URL:-}" ]; then
     ENV_ARGS+=(-e "DATABASE_URL=$DATABASE_URL")
 fi
-if [ -n "${AI_PROXY_BASE_URL:-}" ]; then
-    ENV_ARGS+=(-e "AI_PROXY_BASE_URL=$AI_PROXY_BASE_URL")
-fi
-if [ -n "${AI_PROXY_ADMIN_SECRET:-}" ]; then
-    ENV_ARGS+=(-e "AI_PROXY_ADMIN_SECRET=$AI_PROXY_ADMIN_SECRET")
-fi
+ENV_ARGS+=(-e "AI_PROXY_BASE_URL=$AI_PROXY_BASE_URL" -e "AI_PROXY_ADMIN_SECRET=$AI_PROXY_ADMIN_SECRET")
 if [ -n "$RESOLVED_REDIS_URL" ]; then
     ENV_ARGS+=(-e "REDIS_URL=$RESOLVED_REDIS_URL")
 fi
