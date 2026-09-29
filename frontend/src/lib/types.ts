@@ -126,7 +126,43 @@ export interface AdminUser {
   name: string;
   role: Role;
   created_at: string;
+  last_login_at: string | null;
+  last_active_at: string | null;
+  locale: string | null;
   plan: string | null;
+}
+export interface AdminUsersPage {
+  users: AdminUser[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+export interface AdminUserProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  last_active_at: string | null;
+  email_verified_at: string | null;
+  locale: string | null;
+  timezone: string | null;
+  avatar_url: string | null;
+}
+export interface AdminUserMembership {
+  membership_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  role: string;
+  plan: string;
+  subscription_status: BillingSubscriptionStatus | null;
+}
+export interface AdminUserDetail {
+  user: AdminUserProfile;
+  memberships: AdminUserMembership[];
+  usage_by_workspace: AdminUsageByWorkspace[];
 }
 export interface AdminUsageByWorkspace {
   ws_id: string;

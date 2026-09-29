@@ -16,9 +16,10 @@ interface Props<T> {
   loading?: boolean;
   error?: unknown;
   empty?: string;
+  onRowClick?: (row: T) => void;
 }
 
-export function Table<T>({ columns, rows, rowKey, loading, error, empty }: Props<T>) {
+export function Table<T>({ columns, rows, rowKey, loading, error, empty, onRowClick }: Props<T>) {
   const { t } = useTranslation();
   return (
     <div className="glass overflow-hidden rounded-2xl">
@@ -58,7 +59,11 @@ export function Table<T>({ columns, rows, rowKey, loading, error, empty }: Props
             {!loading &&
               !error &&
               rows?.map((r) => (
-                <tr key={rowKey(r)} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03]">
+                <tr
+                  key={rowKey(r)}
+                  className={"border-b border-white/5 last:border-0 hover:bg-white/[0.03] " + (onRowClick ? "cursor-pointer" : "")}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}
+                >
                   {columns.map((c) => (
                     <td key={c.key} className={"px-4 py-2.5 align-top " + (c.className ?? "")}>
                       {c.render(r)}

@@ -22,6 +22,7 @@ class User(IdMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avatar_url: Mapped[str | None] = mapped_column(Text)
     locale: Mapped[str] = mapped_column(String(10), default="en-US", nullable=False)   # en-US | fr-CA
     timezone: Mapped[str] = mapped_column(String(64), default="America/New_York", nullable=False)

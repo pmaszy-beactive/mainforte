@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from mainforte.auth.jwt import decode_session
+from mainforte.db.base import utcnow
 from mainforte.db.models import Membership, User, Workspace
 from mainforte.db.session import get_db
+
+LAST_ACTIVE_BUMP_INTERVAL = timedelta(minutes=5)
 
 
 @dataclass
@@ -38,6 +42,12 @@ def resolve_identity(token: str | None, db: Session) -> Identity | None:
     real = db.get(User, claims["sub"])
     if not real or not real.is_active:
         return None  # deleted/disabled accounts cannot keep using a JWT
+
+    now = utcnow()
+    if not real.last_active_at or (now - real.last_active_at) > LAST_ACTIVE_BUMP_INTERVAL:
+        real.last_active_at = now
+        db.commit()
+
     eff = real
     if claims.get("act_as"):
         if not real.is_superuser:

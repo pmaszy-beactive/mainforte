@@ -33,16 +33,191 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(re
 
 
 @router.get("/users")
-def users(q: str = "", limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+def users(q: str = "", offset: int = Query(0, ge=0), limit: int = Query(50, le=200), db: Session = Depends(get_db)):
     query = db.query(User)
     if q:
         query = query.filter(User.email.ilike(f"%{q}%") | User.name.ilike(f"%{q}%"))
-    rows = query.order_by(User.created_at.desc()).limit(limit).all()
+    total = query.count()
+    rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
     plans = dict(db.query(Membership.user_id, func.max(Workspace.plan)).join(Workspace, Workspace.id == Membership.workspace_id)
                  .filter(Membership.user_id.in_([u.id for u in rows])).group_by(Membership.user_id).all()) if rows else {}
     return {"users": [{"id": u.id, "email": u.email, "name": u.name, "role": u.role, "created_at": u.created_at.isoformat(),
                        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
-                       "locale": u.locale, "plan": plans.get(u.id, "trial")} for u in rows]}
+                       "last_active_at": u.last_active_at.isoformat() if u.last_active_at else None,
+                       "locale": u.locale, "plan": plans.get(u.id, "trial")} for u in rows],
+            "total": total, "offset": offset, "limit": limit}
+
+
+@router.get("/users/{user_id}")
+def user_detail(user_id: str, db: Session = Depends(get_db)):
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+
+    memberships = (
+        db.query(Membership, Workspace)
+        .join(Workspace, Workspace.id == Membership.workspace_id)
+        .filter(Membership.user_id == user_id)
+        .all()
+    )
+    ws_ids = [ws.id for _, ws in memberships]
+
+    # Per-user usage, same Event-aggregation pattern as finances(), scoped by Event.user_id and
+    # grouped per-workspace so a user active in multiple workspaces doesn't have costs conflated.
+    cost_expr = func.sum(func.cast(Event.payload["cost_usd"].astext, Numeric))
+    in_tok_expr = func.sum(func.cast(Event.payload["input_tokens"].astext, Numeric))
+    out_tok_expr = func.sum(func.cast(Event.payload["output_tokens"].astext, Numeric))
+    usage_rows = (
+        db.query(Event.ws_id, Workspace.name, in_tok_expr, out_tok_expr, cost_expr)
+        .join(Workspace, Workspace.id == Event.ws_id)
+        .filter(Event.type == "billing.usage.recorded", Event.user_id == user_id)
+        .group_by(Event.ws_id, Workspace.name)
+        .order_by(cost_expr.desc())
+        .all()
+    )
+    usage_by_workspace = [
+        {"ws_id": ws_id, "ws_name": ws_name, "input_tokens": int(in_tok or 0), "output_tokens": int(out_tok or 0),
+         "cost_usd": float(cost or 0.0)}
+        for ws_id, ws_name, in_tok, out_tok, cost in usage_rows
+    ]
+
+    # Latest subscription per workspace, for the License tab's read-only real-status display —
+    # Subscription.status is the true gating source, Workspace.plan is just a display cache.
+    subs = (
+        db.query(Subscription).filter(Subscription.ws_id.in_(ws_ids))
+        .order_by(Subscription.created_at.desc()).all()
+        if ws_ids else []
+    )
+    subs_by_ws: dict[str, Subscription] = {}
+    for s in subs:
+        subs_by_ws.setdefault(s.ws_id, s)
+
+    return {
+        "user": {
+            "id": u.id, "email": u.email, "name": u.name, "role": u.role, "is_active": u.is_active,
+            "created_at": u.created_at.isoformat(),
+            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "last_active_at": u.last_active_at.isoformat() if u.last_active_at else None,
+            "email_verified_at": u.email_verified_at.isoformat() if u.email_verified_at else None,
+            "locale": u.locale, "timezone": u.timezone, "avatar_url": u.avatar_url,
+        },
+        "memberships": [
+            {"membership_id": m.id, "workspace_id": ws.id, "workspace_name": ws.name,
+             "role": m.role, "plan": ws.plan,
+             "subscription_status": subs_by_ws[ws.id].status if ws.id in subs_by_ws else None}
+            for m, ws in memberships
+        ],
+        "usage_by_workspace": usage_by_workspace,
+    }
+
+
+class SetUserActiveIn(BaseModel):
+    is_active: bool
+
+
+@router.post("/users/{user_id}/active")
+def set_user_active(user_id: str, body: SetUserActiveIn, ident: Identity = Depends(require_superuser),
+                     db: Session = Depends(get_db)):
+    from mainforte.events import emit
+
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+    if u.id == ident.real_user.id and not body.is_active:
+        raise HTTPException(400, "cannot suspend your own account")
+    u.is_active = body.is_active
+    emit(db, "user.suspended" if not body.is_active else "user.reactivated",
+         ws_id=None, actor=("user", ident.real_user.id),
+         payload={"user_id": u.id, "by": ident.real_user.email})
+    db.commit()
+    return {"ok": True, "user_id": u.id, "is_active": u.is_active}
+
+
+class SetUserRoleIn(BaseModel):
+    role: str  # "user" | "superuser"
+
+
+@router.post("/users/{user_id}/role")
+def set_user_role(user_id: str, body: SetUserRoleIn, ident: Identity = Depends(require_superuser),
+                   db: Session = Depends(get_db)):
+    from mainforte.events import emit
+
+    if body.role not in ("user", "superuser"):
+        raise HTTPException(400, "invalid role")
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+    if u.id == ident.real_user.id and body.role != "superuser":
+        raise HTTPException(400, "cannot demote your own account")
+    old_role = u.role
+    u.role = body.role
+    emit(db, "user.role_changed", ws_id=None, actor=("user", ident.real_user.id),
+         payload={"user_id": u.id, "old_role": old_role, "new_role": body.role, "by": ident.real_user.email})
+    db.commit()
+    return {"ok": True, "user_id": u.id, "role": u.role}
+
+
+class AddMembershipIn(BaseModel):
+    workspace_id: str
+    role: str = "member"  # owner | admin | member — mirrors Membership.role
+
+
+@router.post("/users/{user_id}/memberships")
+def add_membership(user_id: str, body: AddMembershipIn, ident: Identity = Depends(require_superuser),
+                    db: Session = Depends(get_db)):
+    from mainforte.events import emit
+
+    u = db.get(User, user_id)
+    ws = db.get(Workspace, body.workspace_id)
+    if not u or not ws:
+        raise HTTPException(404, "user or workspace not found")
+    existing = db.query(Membership).filter_by(workspace_id=body.workspace_id, user_id=user_id).first()
+    if existing:
+        raise HTTPException(409, "user is already a member of this workspace")
+    m = Membership(workspace_id=body.workspace_id, user_id=user_id, role=body.role)
+    db.add(m)
+    emit(db, "user.membership_added", ws_id=body.workspace_id, actor=("user", ident.real_user.id),
+         payload={"user_id": user_id, "role": body.role, "by": ident.real_user.email})
+    db.commit()
+    return {"ok": True, "membership_id": m.id}
+
+
+@router.post("/users/{user_id}/memberships/{workspace_id}/remove")
+def remove_membership(user_id: str, workspace_id: str, ident: Identity = Depends(require_superuser),
+                       db: Session = Depends(get_db)):
+    from mainforte.events import emit
+
+    ws = db.get(Workspace, workspace_id)
+    if ws and ws.owner_id == user_id:
+        raise HTTPException(400, "cannot remove the workspace owner's membership")
+    m = db.query(Membership).filter_by(workspace_id=workspace_id, user_id=user_id).first()
+    if not m:
+        raise HTTPException(404, "membership not found")
+    db.delete(m)
+    emit(db, "user.membership_removed", ws_id=workspace_id, actor=("user", ident.real_user.id),
+         payload={"user_id": user_id, "by": ident.real_user.email})
+    db.commit()
+    return {"ok": True}
+
+
+class OverridePlanIn(BaseModel):
+    plan: str = Field(min_length=1, max_length=40)
+
+
+@router.post("/workspaces/{workspace_id}/plan-override")
+def override_workspace_plan(workspace_id: str, body: OverridePlanIn,
+                             ident: Identity = Depends(require_superuser), db: Session = Depends(get_db)):
+    from mainforte.events import emit
+
+    ws = db.get(Workspace, workspace_id)
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    old_plan = ws.plan
+    ws.plan = body.plan
+    emit(db, "workspace.plan_overridden", ws_id=ws.id, actor=("user", ident.real_user.id),
+         payload={"old_plan": old_plan, "new_plan": body.plan, "by": ident.real_user.email})
+    db.commit()
+    return {"ok": True, "workspace_id": ws.id, "plan": ws.plan}
 
 
 @router.get("/finances")
