@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -188,6 +189,37 @@ def run_tool(self, *, tool_name: str, tool_input: dict[str, Any], ws_id: str, co
 # ---------------------------------------------------------------- task stage pipeline (P2 phase 5)
 
 
+FETCH_CACHE_TOOLS = {"browser_navigate"}
+FETCH_CACHE_TTL_SECONDS = 900  # 15 min — see plan §5; scoped to recurring task stages only
+
+
+def _fetch_cache_get(url: str) -> dict[str, Any] | None:
+    """A fresh-enough cached page for this URL, or None. Only ever consulted from task-stage runs
+    (see `_run_stage_tool`) — chat's ad-hoc `browser_navigate` via `run_tool` never checks this,
+    since a live conversation always wants the current page, not a shared, possibly-stale one."""
+    from mainforte.db.models import FetchCache
+
+    with db_session() as db:
+        row = db.query(FetchCache).filter(FetchCache.url == url).one_or_none()
+        if row is None:
+            return None
+        if datetime.now(UTC) - row.fetched_at > timedelta(seconds=FETCH_CACHE_TTL_SECONDS):
+            return None
+        return {"title": row.content.get("title", ""), "url": row.content.get("url", url)}
+
+
+def _fetch_cache_put(url: str, result: dict[str, Any]) -> None:
+    from mainforte.db.models import FetchCache
+
+    with db_session() as db:
+        row = db.query(FetchCache).filter(FetchCache.url == url).one_or_none()
+        if row is None:
+            db.add(FetchCache(url=url, content=result, fetched_at=datetime.now(UTC)))
+        else:
+            row.content = result
+            row.fetched_at = datetime.now(UTC)
+
+
 def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, correlation_id: str,
                      thread_id: str | None, persona_id: str | None, task_id: str) -> dict[str, Any]:
     """Runs one stage's tool call, sandboxed-or-not exactly like the chat router does, but
@@ -197,7 +229,13 @@ def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, c
     In-process (non-sandboxed) handlers also receive the executing run's own `task_id` — a stage's
     literal `input` dict is cloned verbatim on every recurring firing (see `fire_scheduled_task`),
     so it can never itself name the run's id; a tool that needs to know "which run am I" (e.g. to
-    look up its own template's prior runs) must accept it as an injected kwarg instead."""
+    look up its own template's prior runs) must accept it as an injected kwarg instead.
+
+    For `FETCH_CACHE_TOOLS` (currently just `browser_navigate`), checks/populates a shared,
+    TTL'd `FetchCache` row keyed by URL before/after the sandboxed call — plan §5's dedup, so two
+    workspaces' recurring watches hitting the same public URL within the TTL only pay for one
+    real fetch. Scoped to this task-stage path only, never chat's `run_tool`, since a live
+    conversation should always see the current page."""
     from mainforte.tools.catalog import TOOLS
 
     tool = TOOLS.get(tool_name)
@@ -207,16 +245,23 @@ def _run_stage_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str, c
         emit(db, "tool.started", ws_id=ws_id, actor=("system", None), correlation_id=correlation_id,
              payload={"thread_id": thread_id, "persona_id": persona_id, "name": tool_name, "input": tool_input})
     if tool.sandboxed:
-        job_id = new_id()
-        workspace = _job_dir(job_id)
-        try:
-            result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id)
-        except Exception as e:
-            outcome: dict[str, Any] = {"ok": False, "error": str(e)}
+        cache_url = tool_input.get("url") if tool_name in FETCH_CACHE_TOOLS else None
+        cached = _fetch_cache_get(cache_url) if cache_url else None
+        if cached is not None:
+            outcome: dict[str, Any] = {"ok": True, "result": cached}
         else:
-            outcome = {"ok": True, "result": result}
-        finally:
-            shutil.rmtree(workspace, ignore_errors=True)
+            job_id = new_id()
+            workspace = _job_dir(job_id)
+            try:
+                result = _run_sandboxed(tool_name=tool_name, tool_input=tool_input, workspace=workspace, ws_id=ws_id)
+            except Exception as e:
+                outcome = {"ok": False, "error": str(e)}
+            else:
+                outcome = {"ok": True, "result": result}
+                if cache_url:
+                    _fetch_cache_put(cache_url, result)
+            finally:
+                shutil.rmtree(workspace, ignore_errors=True)
     else:
         try:
             outcome = {"ok": True, "result": tool.handler(**tool_input, task_id=task_id)}

@@ -150,7 +150,9 @@ class ClientMessage(Base):
 
 
 class Upload(IdMixin, Base):
-    """A file a human attached (or a persona produced). Bytes live in storage under `key`."""
+    """A file a human attached (or a persona produced). Bytes live in storage under `key`.
+    `extracted_text` is populated at upload time for text-extractable types (PDFs, etc) so the
+    content can be searched and passed to the LLM without re-reading blob storage."""
 
     __tablename__ = "uploads"
 
@@ -161,6 +163,7 @@ class Upload(IdMixin, Base):
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str | None] = mapped_column(String(64))
+    extracted_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -184,7 +187,11 @@ class Persona(IdMixin, TimestampMixin, Base):
 
 class Memory(IdMixin, TimestampMixin, Base):
     """A note in workspace memory. `kind` discriminates shared workspace notes, per-persona notes,
-    and rollup summaries. `persona_id` is set only for persona-scoped kinds."""
+    and rollup summaries. `persona_id` is set only for persona-scoped kinds. `text_fts` (search
+    over `text`) is added by the migration only, never ORM-mapped here — same treatment as
+    Event.text_fts and Listing.text_fts — so this table stays searchable past the point a
+    `rollup_day` row's source events have aged out of event retention (tasks/system.py's
+    sweep_old_events)."""
 
     __tablename__ = "memories"
     __table_args__ = (Index("ix_memories_ws_kind", "ws_id", "kind", "created_at"),)
@@ -195,6 +202,51 @@ class Memory(IdMixin, TimestampMixin, Base):
     thread_id: Mapped[str | None] = mapped_column(String(26))  # set for rollup_* (which thread it summarizes)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(40), default="concierge", nullable=False)  # concierge|persona|rollup|user
+
+
+class MemoryChunk(IdMixin, TimestampMixin, Base):
+    """Searchable text extracted from an upload (attachments have no other home for their content:
+    `Upload` stores only metadata, and raw event payloads never carry file bytes). `text_fts` is
+    added by the migration only, never ORM-mapped here — same treatment as Event.text_fts."""
+
+    __tablename__ = "memory_chunks"
+    __table_args__ = (Index("ix_memory_chunks_ws_source", "ws_id", "source_type", "created_at"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "upload"
+    source_id: Mapped[str] = mapped_column(String(26), nullable=False)  # Upload.id
+    thread_id: Mapped[str | None] = mapped_column(String(26), index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Preference(IdMixin, TimestampMixin, Base):
+    """A durable want/preference the concierge extracted from a message, distinct from the raw
+    text it came from. Lifecycle: noted (just extracted) -> proposed (concierge asked the user
+    about a standing watch) -> watching (user said yes, task_id set) -> dismissed (user said no,
+    or it went stale unconfirmed)."""
+
+    __tablename__ = "preferences"
+    __table_args__ = (Index("ix_preferences_ws_status", "ws_id", "status", "created_at"),)
+
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="noted", nullable=False)  # noted|proposed|watching|dismissed
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+
+
+class FetchCache(IdMixin, Base):
+    """TTL'd cache of raw fetched content, keyed by URL, shared across workspaces so two watches
+    on the same public page don't both pay to scrape it. Fetch-only: never shares Memory,
+    MemoryChunk, or Preference rows, which stay strictly workspace-scoped."""
+
+    __tablename__ = "fetch_cache"
+
+    url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 # ---------------------------------------------------------------- tasks

@@ -224,7 +224,7 @@ export function useEventStream(workspaceId: string | null | undefined) {
     (async () => {
       let after = useStream.getState().lastIds[workspaceId] ?? null;
       try {
-        const { events } = await api.workspaces.events(workspaceId, { limit: 200 });
+        const { events } = await api.workspaces.events(workspaceId, { after: after ?? undefined, limit: 200 });
         if (cancelled) return;
         if (events.length) {
           dispatch({ type: "hydrate", events });
@@ -252,9 +252,16 @@ export function useEventStream(workspaceId: string | null | undefined) {
 
     const onOnline = () => socketRef.current?.reconnectNow();
     window.addEventListener("online", onOnline);
+    // A backgrounded/suspended tab throttles the socket's setTimeout-based dead-link watchdog, so a
+    // connection that died while hidden can sit "open" indefinitely. Force a reconnect on return.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") socketRef.current?.forceReconnect();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
       socketRef.current?.close();
       socketRef.current = null;
     };

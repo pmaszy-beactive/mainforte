@@ -5,13 +5,18 @@ from __future__ import annotations
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from mainforte.db.models import Event, Memory, Persona, User
+from mainforte.db.models import Event, Memory, Persona, Preference, User
+from mainforte.personas.recall import format_relevant_history, search_memory
 
 MEMORY_LIMIT = 20
 HISTORY_LIMIT = 20
+NOTED_PREFERENCES_LIMIT = 10
 
 
-def build_system_prompt(db: Session, *, ws_id: str, persona: Persona, base: str, user: User | None = None) -> str:
+def build_system_prompt(
+    db: Session, *, ws_id: str, persona: Persona, base: str, user: User | None = None,
+    recall_query: str | None = None,
+) -> str:
     rows = (
         db.query(Memory)
         .filter(
@@ -29,6 +34,30 @@ def build_system_prompt(db: Session, *, ws_id: str, persona: Persona, base: str,
     if rows:
         notes = "\n".join(f"- {r.text}" for r in reversed(rows))
         out = f"{out}\n\n## Workspace memory\n{notes}"
+
+    if recall_query:
+        hits = search_memory(db, ws_id=ws_id, query=recall_query)
+        block = format_relevant_history(hits)
+        if block:
+            out = f"{out}\n\n{block}"
+
+    if persona.slug == "concierge":
+        noted = (
+            db.query(Preference)
+            .filter(Preference.ws_id == ws_id, Preference.status == "noted")
+            .order_by(Preference.created_at.desc())
+            .limit(NOTED_PREFERENCES_LIMIT)
+            .all()
+        )
+        if noted:
+            lines = "\n".join(f"- {p.text}" for p in reversed(noted))
+            out = (
+                f"{out}\n\n## Things this member has mentioned wanting\n{lines}\n\n"
+                "If one of these is worth a standing watch (something that can change over time, "
+                "like a price or availability, not a one-shot answerable request), consider "
+                "offering to set it up. Only propose it in conversation — never create a task "
+                "without the member confirming first."
+            )
 
     flavor = (persona.settings or {}).get("personality_flavor")
     if flavor:

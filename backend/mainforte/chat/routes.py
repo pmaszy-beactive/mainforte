@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, current_identity, require_membership
-from mainforte.db.models import ClientMessage, Upload
+from mainforte.chat.attachments import extract_text
+from mainforte.db.base import utcnow
+from mainforte.db.models import ClientMessage, MemoryChunk, Upload
 from mainforte.db.session import get_db
 from mainforte.events import emit
 from mainforte.ids import new_id
@@ -23,7 +25,8 @@ router = APIRouter(prefix="/api/workspaces/{workspace_id}", tags=["chat"])
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_PREFIXES = ("image/", "text/", "application/pdf", "application/json", "text/csv",
-                    "application/vnd.openxmlformats-officedocument", "application/zip")
+                    "application/vnd.openxmlformats-officedocument", "application/zip",
+                    "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint")
 
 
 class AttachmentRef(BaseModel):
@@ -71,9 +74,14 @@ async def upload(workspace_id: str, file: UploadFile = File(...), ident: Identit
     uid = new_id()
     key = upload_key(ident.user.id, uid, file.filename or "file")
     stored = get_storage().put(key, data, ctype)
+    extracted = extract_text(content_type=ctype, data=data)
+    now = utcnow()
     up = Upload(id=uid, ws_id=ws.id, user_id=ident.user.id, key=key, name=file.filename or "file",
-                content_type=ctype, size=stored.size, sha256=stored.sha256)
+                content_type=ctype, size=stored.size, sha256=stored.sha256, extracted_text=extracted,
+                created_at=now)
     db.add(up)
+    if extracted:
+        db.add(MemoryChunk(ws_id=ws.id, source_type="upload", source_id=uid, text=extracted, occurred_at=now))
     emit(db, "chat.attachment.uploaded", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
          payload={"upload_id": uid, "name": up.name, "content_type": ctype, "size": stored.size})
     return _upload_out(up)

@@ -361,7 +361,7 @@ _register(Tool(
 ))
 
 
-def _car_search_template_id(db: Any, task_id: str) -> str:
+def _watch_state_template_id(db: Any, task_id: str) -> str:
     """A run row's own template id if it's a recurring clone (`result.schedule_template_id`,
     set by `fire_scheduled_task`), else the run's own id — covering the template's first,
     pre-recurrence run, where there is no prior clone to point back to yet."""
@@ -373,17 +373,17 @@ def _car_search_template_id(db: Any, task_id: str) -> str:
     return task_id
 
 
-def _car_search_state_get(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
-    """In-process handler for `car_search_state` (verb=get): accumulates `seen_urls`/`shortlist`
-    from every prior run of this task's template, oldest first. Narrowly scoped to the car-search
-    proof case — not a general state-store tool (see PLAN.md's car-search plan, Part 3): reuses
-    `Task.result` JSONB exactly like `fire_scheduled_task` already does for `schedule_template_id`,
-    rather than adding a new table."""
+def _watch_state_get(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
+    """In-process handler for `watch_state` (verb=get): accumulates `seen_keys`/`data` from every
+    prior run of this task's template, oldest first. Domain-agnostic generalization of the
+    car-search proof case's `car_search_state` — same `Task.result` JSONB reuse
+    (`fire_scheduled_task` already writes `schedule_template_id` there), just without any
+    car/web-search-specific field shape."""
     from mainforte.db.models import Task
     from mainforte.db.session import db_session
 
     with db_session() as db:
-        template_id = _car_search_template_id(db, task_id)
+        template_id = _watch_state_template_id(db, task_id)
         rows = (
             db.query(Task.result)
             .filter(
@@ -393,101 +393,85 @@ def _car_search_state_get(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
             .order_by(Task.created_at.asc())
             .all()
         )
-        seen_urls: list[str] = []
-        shortlist: list[dict[str, Any]] = []
+        seen_keys: list[str] = []
+        data: list[Any] = []
         for (result,) in rows:
             if not result:
                 continue
-            for url in result.get("seen_urls", []):
-                if url not in seen_urls:
-                    seen_urls.append(url)
-            shortlist.extend(result.get("shortlist", []))
-    return {"template_id": template_id, "seen_urls": seen_urls, "shortlist": shortlist}
+            for key in result.get("seen_keys", []):
+                if key not in seen_keys:
+                    seen_keys.append(key)
+            data.extend(result.get("data", []))
+    return {"template_id": template_id, "seen_keys": seen_keys, "data": data}
 
 
-def _car_search_state_put(*, task_id: str, **_kwargs: Any) -> dict[str, Any]:
-    """In-process handler for `car_search_state` (verb=put): finds this run's own `web_search`
-    stage result, excludes any listing URL already surfaced by an earlier run of this same
-    template, and writes the genuinely-new URLs/shortlist into this run's own `Task.result` —
-    without disturbing the `schedule_template_id` key `fire_scheduled_task` already wrote there.
-
-    A stage's `input` is authored once, statically, at `create_task` time (`fire_scheduled_task`
-    clones `plan` verbatim on every firing — see `_run_stage_tool`'s docstring), so this can't
-    receive the prior `web_search` stage's own result as a literal argument the way a normal
-    function call would. Instead it finds that stage's own `tool.ended` event — emitted by
-    `_run_stage_tool` under the deterministic `f"{task.correlation_id}:{stage_index}"` correlation
-    id — by scanning this task's own `plan` for the (single, expected) `web_search` stage, and pulls
-    the citations straight out of that event's payload."""
-    from mainforte.db.models import Event, Task
+def _watch_state_put(*, task_id: str, new_keys: list[str] | None = None,
+                      data: list[Any] | None = None, **_kwargs: Any) -> dict[str, Any]:
+    """In-process handler for `watch_state` (verb=put): excludes any key already surfaced by an
+    earlier run of this same template, and writes the genuinely-new keys/data into this run's own
+    `Task.result` — without disturbing the `schedule_template_id` key `fire_scheduled_task` already
+    wrote there. Unlike `car_search_state`'s put, this takes `new_keys`/`data` directly as tool
+    arguments rather than re-deriving them from a hardcoded `web_search` stage's event — the
+    calling persona already knows what it found this run and what's genuinely new."""
+    from mainforte.db.models import Task
     from mainforte.db.session import db_session
 
     with db_session() as db:
         task = db.get(Task, task_id)
         if task is None:
             raise ValueError(f"no such task: {task_id}")
-        prior = _car_search_state_get(task_id=task_id)
-        already_seen = set(prior["seen_urls"])
+        prior = _watch_state_get(task_id=task_id)
+        already_seen = set(prior["seen_keys"])
 
-        base_corr = task.correlation_id or task_id
-        new_urls: list[str] = []
-        shortlist: list[dict[str, Any]] = []
-        for stage_index, stage in enumerate(task.plan or []):
-            if stage.get("type") == "tool" and stage.get("tool") == "web_search":
-                stage_corr = f"{base_corr}:{stage_index}"
-                event = (
-                    db.query(Event)
-                    .filter(Event.type == "tool.ended", Event.correlation_id == stage_corr)
-                    .order_by(Event.id.desc())
-                    .first()
-                )
-                if event is not None:
-                    search_result = event.payload.get("result") or {}
-                    for citation in search_result.get("citations", []):
-                        url = citation.get("url")
-                        if url and url not in already_seen and url not in new_urls:
-                            new_urls.append(url)
-                            shortlist.append(citation)
+        deduped_keys: list[str] = []
+        for key in new_keys or []:
+            if key not in already_seen and key not in deduped_keys:
+                deduped_keys.append(key)
+
         result = dict(task.result or {})
-        result["seen_urls"] = new_urls
-        result["shortlist"] = shortlist
+        result["seen_keys"] = deduped_keys
+        result["data"] = data or []
         task.result = result
-    return {"ok": True, "stored_urls": len(new_urls), "stored_shortlist": len(shortlist)}
+    return {"ok": True, "stored_keys": len(deduped_keys), "stored_data": len(data or [])}
 
 
-def _car_search_state(*, verb: str, task_id: str, **_kwargs: Any) -> dict[str, Any]:
+def _watch_state(*, verb: str, task_id: str, new_keys: list[str] | None = None,
+                  data: list[Any] | None = None, **_kwargs: Any) -> dict[str, Any]:
     if verb == "get":
-        return _car_search_state_get(task_id=task_id)
+        return _watch_state_get(task_id=task_id)
     if verb == "put":
-        return _car_search_state_put(task_id=task_id)
+        return _watch_state_put(task_id=task_id, new_keys=new_keys, data=data)
     raise ValueError(f"unknown verb {verb!r}, expected 'get' or 'put'")
 
 
 _register(Tool(
-    name="car_search_state",
+    name="watch_state",
     description=(
-        "Read or write this recurring car-search task's cross-run memory: which listing URLs have "
-        "already been surfaced to the user, and the accumulated shortlist. Call with verb='get' at "
-        "the start of a run to load what prior runs already showed (empty on the first run); call "
-        "with verb='put' at the end of a run to record newly-seen URLs and the updated shortlist so "
-        "the next weekly run doesn't repeat them. Scoped to this one task's own recurrence — not a "
-        "general-purpose state store."
+        "Read or write this recurring task's cross-run memory: which result keys (e.g. listing "
+        "URLs, flight ids — whatever this watch is tracking) have already been surfaced to the "
+        "user, and the accumulated result data. Call with verb='get' at the start of a run to "
+        "load what prior runs already showed (empty on the first run); call with verb='put' at "
+        "the end of a run, passing `new_keys` (all keys seen this run — already-seen ones are "
+        "filtered out automatically) and `data` (this run's result data to keep), so the next "
+        "scheduled run doesn't repeat them. Scoped to this one task's own recurrence — not a "
+        "general-purpose state store shared across tasks."
     ),
     input_schema={
         "type": "object",
         "properties": {
             "verb": {"type": "string", "enum": ["get", "put"]},
-            "new_urls": {
+            "new_keys": {
                 "type": "array", "items": {"type": "string"},
-                "description": "put only: all listing URLs seen this run (merged with prior runs' on the next get)",
+                "description": "put only: all result keys seen this run (merged with prior runs' on the next get)",
             },
-            "shortlist": {
+            "data": {
                 "type": "array", "items": {"type": "object"},
-                "description": "put only: this run's shortlist entries to append to the accumulated list",
+                "description": "put only: this run's result data to keep for the next get",
             },
         },
         "required": ["verb"],
     },
-    handler=_car_search_state,
+    handler=_watch_state,
     sandboxed=False,
 ))
 

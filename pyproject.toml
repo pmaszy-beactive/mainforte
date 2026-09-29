@@ -1,6 +1,6 @@
 [project]
 name = "mainforte"
-version = "0.1.52"
+version = "0.1.53"
 description = "Mainforte v3 — AI staff that actually do the work"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -26,6 +26,10 @@ dependencies = [
   "python-multipart>=0.0.9",
   "orjson>=3.10",
   "structlog>=24",
+  "pypdf>=5.0",
+  "python-docx>=1.1",
+  "python-pptx>=1.0",
+  "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
