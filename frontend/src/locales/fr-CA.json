@@ -201,8 +201,17 @@
     "viewPane": "Vue",
     "viewPaneTitle": "Volet de visualisation",
     "viewPaneHint": "Le navigateur en direct et les vues de tâches apparaîtront ici.",
-    "activity": "Activité",
     "activityEmpty": "Aucune activité pour l'instant.",
+    "steps": "{{count}} étapes",
+    "thinking": {
+      "tool": "Utilisation d'un outil…",
+      "stage": "Traitement d'une étape…",
+      "working": "Réflexion…",
+      "browsing": "Navigation…",
+      "building": "Construction…",
+      "checking": "Vérification…",
+      "editing": "Modification de fichiers…"
+    },
     "status": {
       "open": "En direct",
       "connecting": "Connexion…",

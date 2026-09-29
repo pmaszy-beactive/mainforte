@@ -20,6 +20,8 @@ export interface Bubble {
   clientMsgId: string | null;
   correlationId: string | null;
   attachments: Attachment[];
+  /** This turn's non-message events (tool/task/etc.), in order, keyed by correlation_id. */
+  activity: WsEvent[];
   /** Present on optimistic bubbles that come from the outbox. */
   local?: { status: OutboxStatus; attempts: number; error: string | null };
 }
@@ -74,6 +76,7 @@ function applyEvent(state: State, ev: WsEvent): State {
         clientMsgId: p.client_msg_id ?? null,
         correlationId: ev.correlation_id,
         attachments: p.attachments ?? [],
+        activity: [],
       };
       return { ...state, seen, bubbles: [...state.bubbles, b] };
     }
@@ -101,6 +104,7 @@ function applyEvent(state: State, ev: WsEvent): State {
           clientMsgId: null,
           correlationId: ev.correlation_id,
           attachments: [],
+          activity: [],
         };
         return { ...state, seen, activity, bubbles: [...state.bubbles, b] };
       }
@@ -133,8 +137,34 @@ function applyEvent(state: State, ev: WsEvent): State {
       delete blockedTasks[taskId];
       return { ...state, seen, blockedTasks, activity: pushActivity(state.activity, ev) };
     }
-    default:
-      return { ...state, seen, activity: pushActivity(state.activity, ev) };
+    default: {
+      const activity = pushActivity(state.activity, ev);
+      if (ev.correlation_id == null) return { ...state, seen, activity };
+      const key = streamKey(ev);
+      const idx = state.bubbles.findIndex((b) => b.id === key);
+      if (idx === -1) {
+        const p = ev.payload as { thread_id?: string };
+        const b: Bubble = {
+          id: key,
+          threadId: p.thread_id ?? null,
+          actorType: ev.actor.type,
+          actorId: ev.actor.id,
+          userId: ev.user_id,
+          text: "",
+          ts: ev.ts,
+          streaming: true,
+          canceled: false,
+          clientMsgId: null,
+          correlationId: ev.correlation_id,
+          attachments: [],
+          activity: [ev],
+        };
+        return { ...state, seen, activity, bubbles: [...state.bubbles, b] };
+      }
+      const bubbles = state.bubbles.slice();
+      bubbles[idx] = { ...bubbles[idx], activity: [...bubbles[idx].activity, ev] };
+      return { ...state, seen, activity, bubbles };
+    }
   }
 }
 
