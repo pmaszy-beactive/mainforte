@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { Paperclip, SendHorizontal, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
@@ -26,8 +26,24 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
   const items = useAttachments((s) => s.items);
   const [localIds, setLocalIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [justSent, setJustSent] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const disabled = !workspaceId;
+
+  // Auto-grow the textarea with content instead of scrolling inside a fixed box.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
+
+  // Bridge the gap between hitting Enter and `streaming` flipping true (event-stream
+  // round-trip): without this the Send button gives no feedback for a beat.
+  useEffect(() => {
+    if (streaming) setJustSent(false);
+  }, [streaming]);
 
   const addFiles = (files: FileList | File[] | null | undefined) => {
     if (!workspaceId || !files) return;
@@ -42,6 +58,7 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
     onSend(text.trim(), localIds.filter((id) => items[id]));
     setDraft(draftKey, "");
     setLocalIds([]);
+    setJustSent(true);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -80,6 +97,7 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
           <Paperclip className="size-4" />
         </Button>
         <textarea
+          ref={textareaRef}
           rows={1}
           value={text}
           disabled={disabled}
@@ -87,16 +105,17 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
           onKeyDown={onKey}
           onPaste={onPaste}
           placeholder={t("chat.placeholder")}
-          className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-2 text-sm placeholder:text-fog-700 disabled:opacity-50"
+          className="max-h-64 min-h-[2.5rem] flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm placeholder:text-fog-700 disabled:opacity-50"
         />
-        {streaming && (
+        {streaming ? (
           <Button size="md" variant="danger" onClick={onStop} loading={stopping} aria-label={t("chat.stop")} title={t("chat.stop")}>
             <Square className="size-3.5 fill-current" /> <span className="hidden sm:inline">{t("chat.stop")}</span>
           </Button>
+        ) : (
+          <Button size="md" onClick={submit} disabled={!canSend || justSent} loading={justSent} aria-label={t("chat.send")}>
+            <SendHorizontal className="size-4" />
+          </Button>
         )}
-        <Button size="md" onClick={submit} disabled={!canSend} aria-label={t("chat.send")}>
-          <SendHorizontal className="size-4" />
-        </Button>
       </div>
     </div>
   );
