@@ -201,8 +201,17 @@
     "viewPane": "View",
     "viewPaneTitle": "View pane",
     "viewPaneHint": "Live browser and task views will appear here.",
-    "activity": "Activity",
     "activityEmpty": "No activity yet.",
+    "steps": "{{count}} steps",
+    "thinking": {
+      "tool": "Using a tool…",
+      "stage": "Working through a step…",
+      "working": "Thinking…",
+      "browsing": "Browsing…",
+      "building": "Building…",
+      "checking": "Double-checking…",
+      "editing": "Editing files…"
+    },
     "status": {
       "open": "Live",
       "connecting": "Connecting…",

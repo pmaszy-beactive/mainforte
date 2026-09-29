@@ -13,7 +13,6 @@ import { cn } from "@/lib/cn";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
-import { ActivityStrip } from "./ActivityStrip";
 import { ViewPane } from "./ViewPane";
 import { Lightbox } from "./Lightbox";
 import { TaskBlockedBanner } from "./TaskBlockedBanner";
@@ -45,6 +44,7 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
         clientMsgId: m.client_msg_id,
         correlationId: null,
         attachments: m.attachments.map((a) => ({ id: a.id ?? a.localId, key: a.key ?? "", name: a.name, content_type: a.content_type, size: a.size, url: a.url ?? "", localId: a.localId })),
+        activity: [],
         local: { status: m.status, attempts: m.attempts, error: m.error },
       }));
     return local.length ? [...stream.bubbles, ...local] : stream.bubbles;
@@ -106,7 +106,6 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
               onStop={() => cancel.mutate()}
               onSend={send}
             />
-            <ActivityStrip events={stream.activity} />
           </div>
         </div>
         {viewPaneOpen && <ViewPane />}

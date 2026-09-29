@@ -4,7 +4,6 @@ import { persist } from "zustand/middleware";
 interface UiState {
   railCollapsed: boolean;
   viewPaneOpen: boolean;
-  activityOpen: boolean;
   activeThreadId: string | null; // null = global channel
   workspaceId: string | null;
   /** Composer drafts keyed by `${workspaceId}:${threadId ?? "global"}`. */
@@ -12,7 +11,6 @@ interface UiState {
   setDraft: (key: string, text: string) => void;
   toggleRail: () => void;
   toggleViewPane: () => void;
-  toggleActivity: () => void;
   setThread: (id: string | null) => void;
   setWorkspace: (id: string | null) => void;
 }
@@ -22,7 +20,6 @@ export const useUi = create<UiState>()(
     (set) => ({
       railCollapsed: false,
       viewPaneOpen: false,
-      activityOpen: false,
       activeThreadId: null,
       workspaceId: null,
       drafts: {},
@@ -36,7 +33,6 @@ export const useUi = create<UiState>()(
         }),
       toggleRail: () => set((s) => ({ railCollapsed: !s.railCollapsed })),
       toggleViewPane: () => set((s) => ({ viewPaneOpen: !s.viewPaneOpen })),
-      toggleActivity: () => set((s) => ({ activityOpen: !s.activityOpen })),
       setThread: (activeThreadId) => set({ activeThreadId }),
       setWorkspace: (workspaceId) => set({ workspaceId }),
     }),
