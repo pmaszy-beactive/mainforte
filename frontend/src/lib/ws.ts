@@ -57,6 +57,23 @@ export class EventSocket {
     }
   }
 
+  /**
+   * Force a reconnect even if the socket still reports OPEN. Backgrounded/suspended tabs can leave a
+   * socket whose underlying connection died silently (no onclose fires, so scheduleReconnect never
+   * runs) — call this when the tab regains visibility to guarantee recovery instead of waiting on the
+   * setTimeout-based watchdog, which browsers throttle while the tab is hidden.
+   */
+  forceReconnect() {
+    if (this.closed) return;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.connect();
+      return;
+    }
+    this.ws?.close();
+  }
+
   private setStatus(s: SocketStatus) {
     this.opts.onStatus?.(s, this.attempt);
   }

@@ -302,18 +302,46 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     live_workers = [w for w in managed if not is_stale(w)]
     live = len(live_workers)
 
+    log.info(
+        "reconcile_agent_workers[%s]: managed=%s live=%s desired=%s reconciler_version=%s "
+        "rows=%s",
+        pool, len(managed), live, desired, __version__,
+        [(w.container_name, w.status, w.version, w.last_heartbeat.isoformat() if w.last_heartbeat else None)
+         for w in managed],
+    )
+
     # Rolling replace: some live worker is running an older build than this reconciler's own
     # process — i.e. a redeploy happened. Handled before the plain count-based branches below so
     # a version bump doesn't need a separate desired-count bump to kick off a swap.
     outdated = [w for w in live_workers if w.status != "draining" and w.version and w.version != __version__]
     draining = [w for w in live_workers if w.status == "draining"]
 
+    if outdated:
+        log.info(
+            "reconcile_agent_workers[%s]: outdated=%s (each: worker_version != reconciler_version=%s) "
+            "provisioning_events_last_%ss=%s",
+            pool, [(w.container_name, w.version) for w in outdated], __version__,
+            AGENT_WORKER_PROVISION_GRACE_SECONDS, sorted(_recently_provisioned_names(db, cfg["prefix"])),
+        )
+
     if outdated and live >= desired:
         current_count = sum(1 for w in live_workers if w.version == __version__)
         if current_count < desired:
+            log.info(
+                "reconcile_agent_workers[%s]: current_count=%s < desired=%s -> provisioning replacement(s) "
+                "instead of draining outdated=%s yet",
+                pool, current_count, desired, [w.container_name for w in outdated],
+            )
             return _provision(db, s, pool, cfg, managed, to_add=min(desired - current_count, AGENT_WORKER_MAX_PROVISION_PER_TICK))
         # Enough current-version workers are up — start (or continue) retiring the oldest outdated one.
         victim = min(outdated, key=lambda w: w.container_name or "")
+        log.info(
+            "reconcile_agent_workers[%s]: draining victim=%s (version=%s, last_heartbeat=%s) "
+            "because current_count=%s >= desired=%s",
+            pool, victim.container_name, victim.version,
+            victim.last_heartbeat.isoformat() if victim.last_heartbeat else None,
+            current_count, desired,
+        )
         drain_worker(db, victim.container_name, cfg["queues"])
         emit(db, "worker.draining", ws_id=None, actor=("system", None),
              payload={"container_name": victim.container_name, "pool": pool})
@@ -333,6 +361,10 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     idle_draining = [w for w in draining if _worker_is_idle(w)]
     if idle_draining:
         victim = idle_draining[0]
+        log.info(
+            "reconcile_agent_workers[%s]: destroying idle_draining victim=%s (of %s draining total: %s)",
+            pool, victim.container_name, len(draining), [w.container_name for w in draining],
+        )
         result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": victim.container_name})
         if not result.get("ok"):
             log.warning("reconcile_agent_workers[%s]: destroy trigger failed for draining %s: %s",
@@ -348,6 +380,7 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         return {"ok": True, "live": live, "desired": desired, "action": "none"}
 
     if live < desired:
+        log.info("reconcile_agent_workers[%s]: live=%s < desired=%s -> provisioning", pool, live, desired)
         return _provision(db, s, pool, cfg, managed, to_add=min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK))
 
     # live > desired, no version drift: destroy the newest-named non-draining workers first, never
@@ -357,6 +390,10 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     candidates = [w for w in reversed(managed) if w.status != "draining"]
     to_remove = min(live - desired, AGENT_WORKER_MAX_PROVISION_PER_TICK)
     victims = candidates[:to_remove]
+    log.info(
+        "reconcile_agent_workers[%s]: live=%s > desired=%s -> destroying victims=%s (candidates were %s)",
+        pool, live, desired, [w.container_name for w in victims], [w.container_name for w in candidates],
+    )
     n = 0
     for w in victims:
         result = trigger_jenkins_build(db, s.jenkins_destroy_job, {"WORKER_NAME": w.container_name})
