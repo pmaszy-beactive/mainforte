@@ -8,7 +8,8 @@ import type {
   AdminSites,
   AdminTaskDetail,
   AdminTasks,
-  AdminUser,
+  AdminUserDetail,
+  AdminUsersPage,
   AdminWorkers,
   AdminWorkItemDetail,
   AdminWorkLog,
@@ -214,7 +215,19 @@ export const api = {
       post<MarketplaceOrder>(`/api/marketplace/orders/${encodeURIComponent(id)}/dispute`, { reason }),
   },
   admin: {
-    users: (q?: string) => get<{ users: AdminUser[] }>("/api/admin/users", { q }),
+    users: (q?: string, offset?: number, limit?: number) =>
+      get<AdminUsersPage>("/api/admin/users", { q, offset, limit }),
+    userDetail: (id: string) => get<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(id)}`),
+    setUserActive: (id: string, is_active: boolean) =>
+      post<{ ok: boolean; user_id: string; is_active: boolean }>(`/api/admin/users/${encodeURIComponent(id)}/active`, { is_active }),
+    setUserRole: (id: string, role: string) =>
+      post<{ ok: boolean; user_id: string; role: string }>(`/api/admin/users/${encodeURIComponent(id)}/role`, { role }),
+    addMembership: (id: string, b: { workspace_id: string; role?: string }) =>
+      post<{ ok: boolean; membership_id: string }>(`/api/admin/users/${encodeURIComponent(id)}/memberships`, b),
+    removeMembership: (id: string, workspaceId: string) =>
+      post<{ ok: boolean }>(`/api/admin/users/${encodeURIComponent(id)}/memberships/${encodeURIComponent(workspaceId)}/remove`, {}),
+    overridePlan: (workspaceId: string, plan: string) =>
+      post<{ ok: boolean; workspace_id: string; plan: string }>(`/api/admin/workspaces/${encodeURIComponent(workspaceId)}/plan-override`, { plan }),
     finances: () => get<AdminFinances>("/api/admin/finances"),
     errors: (limit = 100) => get<{ errors: AdminError[] }>("/api/admin/errors", { limit }),
     jobs: () => get<AdminJobs>("/api/admin/jobs"),

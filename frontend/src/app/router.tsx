@@ -23,6 +23,7 @@ const MyOrdersPage = lazy(() => import("@/features/marketplace/MyOrdersPage"));
 const AdminLayout = lazy(() => import("@/features/admin/AdminLayout"));
 const SettingsTab = lazy(() => import("@/features/admin/tabs/SettingsTab"));
 const UsersTab = lazy(() => import("@/features/admin/tabs/UsersTab"));
+const UserDetail = lazy(() => import("@/features/admin/UserDetail"));
 const FinancesTab = lazy(() => import("@/features/admin/tabs/FinancesTab"));
 const ErrorsTab = lazy(() => import("@/features/admin/tabs/ErrorsTab"));
 const JobsTab = lazy(() => import("@/features/admin/tabs/JobsTab"));
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to="settings" replace /> },
                   { path: "settings", element: <SettingsTab /> },
                   { path: "users", element: <UsersTab /> },
+          { path: "users/:id", element: <UserDetail /> },
                   { path: "finances", element: <FinancesTab /> },
                   { path: "errors", element: <ErrorsTab /> },
                   { path: "jobs", element: <JobsTab /> },

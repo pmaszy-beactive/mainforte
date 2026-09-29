@@ -19,11 +19,17 @@ EVENT_TYPES: dict[str, str] = {
     "user.password.reset_requested": "Password reset email requested",
     "user.password.reset": "Password was reset",
     "user.prefs.updated": "User's stored preferences (interaction style, concierge name, etc.) changed",
+    "user.suspended": "Admin suspended a user account",
+    "user.reactivated": "Admin reactivated a suspended user account",
+    "user.role_changed": "Admin changed a user's role",
+    "user.membership_added": "Admin added a user to a workspace",
+    "user.membership_removed": "Admin removed a user from a workspace",
     # workspace
     "workspace.created": "Workspace created",
     "workspace.member.added": "Member added to workspace",
     "workspace.member.removed": "Member removed from workspace",
     "workspace.plan.changed": "Workspace plan changed",
+    "workspace.plan_overridden": "Admin overrode a workspace's plan label (display only, not billing)",
     "workspace.reset": "Workspace wiped and reseeded back to a fresh state",
     # billing
     "billing.card.saved": "Payment method saved",
