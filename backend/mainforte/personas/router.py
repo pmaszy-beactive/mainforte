@@ -31,7 +31,7 @@ from mainforte.tools.catalog import TOOLS, to_anthropic_schema
 
 log = logging.getLogger(__name__)
 
-MAX_REPLY_TOKENS = 1024
+MAX_REPLY_TOKENS = 4096
 MAX_TOOL_ROUNDTRIPS = 5
 MENTION_RE = re.compile(r"@(\w+)")
 
@@ -310,7 +310,8 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
     arche = catalog.get(persona.slug)
     base = arche.system_prompt if arche else "You are a helpful assistant."
     with db_session() as db:
-        system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base, user=user)
+        system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base, user=user,
+                                      recall_query=user_text)
     started = emit_ephemeral(
         "persona.reply.started", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
         correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id},
@@ -358,7 +359,22 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                                    model=persona.model, system=system, messages=messages_sent, tools=_ALL_TOOLS,
                                    text=round_text, tool_use=tool_use_sink,
                                    stop_reason=stop_reason_sink.get("stop_reason"), usage=round_usage)
-                if canceled or not tool_use_sink:
+                if canceled:
+                    break
+                if not tool_use_sink:
+                    if stop_reason_sink.get("stop_reason") == "max_tokens":
+                        # Cut off mid-thought before it reached a tool call (or finished at all) —
+                        # releasing `full` as-is would ship a dangling reply like "Here's the plan
+                        # I'll submit for your approval:" with no plan and no task ever created.
+                        # Ask it to pick up exactly where it left off rather than treating this as a
+                        # normal short reply.
+                        convo.append({"role": "assistant", "content": round_text})
+                        convo.append({"role": "user", "content": (
+                            "Your last reply was cut off before you finished. Continue exactly where "
+                            "you left off — if you were about to take an action (like proposing a "
+                            "task), call the tool now instead of describing it."
+                        )})
+                        continue
                     break
 
                 assistant_content: list[dict[str, Any]] = []
@@ -540,3 +556,6 @@ def route_message(event: dict[str, Any]) -> None:
     if user_id:
         from mainforte.personas.onboarding_extract import maybe_extract_prefs
         maybe_extract_prefs(ws_id=ws_id, user_id=user_id, user_text=user_text)
+
+    from mainforte.personas.preferences_extract import maybe_extract_preference
+    maybe_extract_preference(ws_id=ws_id, user_id=user_id, user_text=user_text, source_event_id=event["id"])
