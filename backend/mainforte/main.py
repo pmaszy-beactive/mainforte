@@ -43,6 +43,7 @@ from mainforte.tasks import system as _tasks_system  # noqa: F401
 from mainforte.tasks import work as _tasks_work  # noqa: F401
 from mainforte.widgets import router as widgets_router
 from mainforte.workspaces.routes import router as ws_router
+from mainforte.ws.routes import close_all_connections
 from mainforte.ws.routes import router as socket_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -59,9 +60,13 @@ async def lifespan(_app: FastAPI):
     finally:
         if settings.in_process_scheduler_enabled:
             scheduler.stop()
+        # Force-close every open websocket on shutdown. uvicorn/ASGI won't do this for you --
+        # an idle-but-open socket (client asleep/backgrounded) otherwise just sits on
+        # `receive_text()`, which is what let a deploy's connection-drain wait hang.
+        await close_all_connections()
 
 
-app = FastAPI(title="Mainforte", version="0.1.53", docs_url="/api/docs", openapi_url="/api/openapi.json",
+app = FastAPI(title="Mainforte", version="0.1.54", docs_url="/api/docs", openapi_url="/api/openapi.json",
               lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
