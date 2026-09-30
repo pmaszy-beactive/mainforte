@@ -28,6 +28,47 @@ def worker_heartbeat() -> None:
     with db_session() as db:
         w = db.query(AgentWorker).filter_by(container_name=WORKER_ID).first()
         if not w:
+            # DEBUG (investigating unexplained pool churn -- 2026-09-30): this is the ONLY place a
+            # pooled worker's AgentWorker row is created. _provision() never inserts the row itself,
+            # it only triggers Jenkins and emits worker.provisioning -- so if a container's process
+            # boots and heartbeats here WITHOUT a matching recent worker.provisioning event, its
+            # existence was never decided by _reconcile_pool/_provision at all, and something else
+            # (Jenkins-side trigger, a crash-restart under `--restart unless-stopped` reviving an old
+            # container under the same name, a manual docker run, etc.) created the container.
+            # Logging every field that could distinguish those cases: hostname, PID, container uptime
+            # proxy (we don't have real uptime, but boot time via psutil isn't worth the dep -- PID +
+            # parent env is enough to correlate against the host's own `docker ps`/`docker inspect`),
+            # and whether ANY worker.provisioning event for this exact name exists at all, regardless
+            # of age (not just inside the 300s grace window) -- if none ever existed, this container
+            # was never provisioned through the reconciler, full stop.
+            ever_provisioned = (
+                db.query(Event.id, Event.ts)
+                .filter(Event.type == "worker.provisioning", Event.payload["container_name"].astext == WORKER_ID)
+                .order_by(Event.ts.desc())
+                .first()
+            )
+            # Process (not container) start time, read from /proc so it survives even if this is a
+            # respawn of a container Docker never actually recreated (e.g. `--restart unless-stopped`
+            # reviving the SAME container after its main process died -- container creation time would
+            # then look old/misleading, but this process's own start time is exact).
+            try:
+                with open("/proc/self/stat") as f:
+                    _clk_ticks_at_boot = int(f.read().split(")")[-1].split()[19])
+                with open("/proc/uptime") as f:
+                    _uptime_s = float(f.read().split()[0])
+                import os as _os
+                _clk_tck = _os.sysconf("SC_CLK_TCK")
+                proc_age_s = round(_uptime_s - (_clk_ticks_at_boot / _clk_tck), 1)
+            except Exception:
+                proc_age_s = None
+            log.warning(
+                "worker_heartbeat: NEW AgentWorker row for container_name=%s (first heartbeat ever seen "
+                "for this name) pid=%s proc_age_s=%s hostname=%s node=%s MAINFORTE_WORKER_ID_env=%s "
+                "matching_worker.provisioning_event=%s",
+                WORKER_ID, os.getpid(), proc_age_s, socket.gethostname(), os.environ.get("NODE_NAME"),
+                os.environ.get("MAINFORTE_WORKER_ID"),
+                (ever_provisioned[0], ever_provisioned[1].isoformat()) if ever_provisioned else None,
+            )
             w = AgentWorker(container_name=WORKER_ID, node=os.environ.get("NODE_NAME"), status="online")
             db.add(w)
         # A draining worker's own heartbeat must not flip it back to "online" — reconcile is what
@@ -450,7 +491,17 @@ def _provision(db, s, pool: str, cfg: dict, managed: list, to_add: int) -> dict:
     from mainforte.jenkins_ssh import trigger_jenkins_build
 
     prefix = cfg["prefix"]
-    used = {w.container_name for w in managed} | _recently_provisioned_names(db, prefix)
+    recently_provisioned = _recently_provisioned_names(db, prefix)
+    used = {w.container_name for w in managed} | recently_provisioned
+    # DEBUG (investigating unexplained pool churn -- 2026-09-30): every call into _provision, with
+    # exactly which names it considered already-used and how many it's about to trigger. If a new
+    # AgentWorker row shows up in worker_heartbeat's own new-row log (above) with no corresponding
+    # "about_to_trigger" name here in the prior ~2 reconcile ticks, that container was not created
+    # by this function -- ruling the reconciler entirely out as the source.
+    log.warning(
+        "reconcile_agent_workers[%s]: _provision called to_add=%s managed=%s recently_provisioned=%s",
+        pool, to_add, [w.container_name for w in managed], sorted(recently_provisioned),
+    )
     n = 0
     idx = 1
     while n < to_add:
@@ -458,6 +509,7 @@ def _provision(db, s, pool: str, cfg: dict, managed: list, to_add: int) -> dict:
         idx += 1
         if name in used:
             continue
+        log.warning("reconcile_agent_workers[%s]: about_to_trigger provision name=%s", pool, name)
         params = {"WORKER_NAME": name}
         if s.worker_api_url:
             params["API_URL"] = s.worker_api_url
