@@ -326,6 +326,23 @@ def _worker_is_idle(w: AgentWorker) -> bool:
     return w.current_job is None
 
 
+def _worker_sort_key(container_name: str | None, prefix: str) -> tuple[int, str]:
+    """Numeric-aware sort key so 'worker-2' sorts before 'worker-10' -- plain string ordering
+    (AgentWorker.container_name.asc(), and this function's own former reliance on it via
+    `reversed(managed)`) put '-10' before '-2' (string "1" < "10" < "2"), so the old "destroy
+    newest-named first" logic picked the freshest real worker as its victim while an ancient,
+    long-stale double-digit-named row (e.g. '...-sandbox-10') never got selected and sat there
+    forever, un-destroyed, permanently occupying a `managed` slot. Falls back to pure string
+    sort for anything that doesn't parse as prefix+int (should never happen for reconciler-owned
+    names, but never crash sorting over it if it does)."""
+    name = container_name or ""
+    if name.startswith(prefix):
+        suffix = name[len(prefix):]
+        if suffix.isdigit():
+            return (int(suffix), name)
+    return (10**9, name)  # unparseable names sort last either direction; never expected in practice
+
+
 def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     from mainforte.jenkins_ssh import trigger_jenkins_build
 
@@ -335,13 +352,14 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     q = db.query(AgentWorker).filter(AgentWorker.container_name.like(f"{prefix}%"))
     if cfg["exclude_prefix"]:
         q = q.filter(~AgentWorker.container_name.like(f"{cfg['exclude_prefix']}%"))
-    managed = q.order_by(AgentWorker.container_name.asc()).all()
+    managed = sorted(q.all(), key=lambda w: _worker_sort_key(w.container_name, prefix))
 
     stale = utcnow() - timedelta(seconds=90)
     def is_stale(w: AgentWorker) -> bool:
         return w.status == "online" and (w.last_heartbeat or stale) <= stale
     live_workers = [w for w in managed if not is_stale(w)]
     live = len(live_workers)
+    stale_workers = [w for w in managed if is_stale(w)]
 
     log.info(
         "reconcile_agent_workers[%s]: managed=%s live=%s desired=%s reconciler_version=%s "
@@ -350,6 +368,21 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         [(w.container_name, w.status, w.version, w.last_heartbeat.isoformat() if w.last_heartbeat else None)
          for w in managed],
     )
+    if stale_workers:
+        # DEBUG (investigating unexplained pool churn -- 2026-09-30): a stale row (status="online"
+        # but no heartbeat in 90s+) is excluded from `live` but still counted in `managed`, and
+        # under the OLD string-sort destroy-candidate ordering could permanently dodge being
+        # picked as a destroy victim (see _worker_sort_key's docstring) -- log every stale row's
+        # age explicitly so a recurring zombie is visible in the log even after the sort fix,
+        # rather than silently inflating `managed` forever.
+        now = utcnow()
+        log.warning(
+            "reconcile_agent_workers[%s]: %s stale row(s) present (online but no heartbeat in "
+            ">=90s, excluded from live but still in managed): %s",
+            pool, len(stale_workers),
+            [(w.container_name, round((now - w.last_heartbeat).total_seconds(), 1) if w.last_heartbeat else None)
+             for w in stale_workers],
+        )
 
     # Rolling replace: some live worker is running an older build than this reconciler's own
     # process — i.e. a redeploy happened. Handled before the plain count-based branches below so
@@ -388,7 +421,9 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
             )
             return _provision(db, s, pool, cfg, managed, to_add=min(desired - current_count, AGENT_WORKER_MAX_PROVISION_PER_TICK))
         # Enough current-version workers are up — start (or continue) retiring the oldest outdated one.
-        victim = min(outdated, key=lambda w: w.container_name or "")
+        # Numeric-aware key (see _worker_sort_key): plain string min() would treat '-10' as
+        # "earlier" than '-2' and pick the wrong victim, same bug as the destroy branch below.
+        victim = min(outdated, key=lambda w: _worker_sort_key(w.container_name, prefix))
         log.info(
             "reconcile_agent_workers[%s]: draining victim=%s (version=%s, last_heartbeat=%s) "
             "because current_count=%s >= desired=%s",
@@ -441,6 +476,14 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     # worker #1 (excluded by prefix match). Same as the idle_draining branch above: the row must
     # be deleted once the (synchronous) destroy trigger succeeds, or it lingers and gets
     # re-selected forever.
+    #
+    # `managed` is now numerically sorted (see _worker_sort_key), so reversed(managed) is genuinely
+    # newest-first -- under the old plain-string sort, '-10' preceded '-2' alphabetically, so a
+    # long-stale double-digit-named zombie row (never destroyed, since it's excluded from `live`
+    # by staleness but still occupies a `managed` slot) could sit in front of any real, freshly-
+    # heartbeated worker in the reversed list forever, meaning the FRESH worker got chosen as the
+    # destroy victim every single tick while the zombie was never even a candidate for removal --
+    # this is the exact shape confirmed in production 2026-09-30 for mainforte-agent-worker-sandbox-10.
     #
     # Exclude workers still inside their provisioning grace window: a worker that just heartbeated
     # for the first time (bumping live above desired transiently) shouldn't be torn down before it
