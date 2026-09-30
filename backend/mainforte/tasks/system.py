@@ -525,6 +525,9 @@ def _provision(db, s, pool: str, cfg: dict, managed: list, to_add: int) -> dict:
     return {"ok": True, "live": len(managed), "action": "provision", "triggered": n}
 
 
+AGENT_WORKER_RECONCILE_LOCK_KEY = 0x6D61696E666F7274  # arbitrary fixed int64 ("mainfort" in hex-ish), namespaced to this one lock
+
+
 @celery.task(name="mainforte.tasks.system.reconcile_agent_workers")
 def reconcile_agent_workers() -> dict:
     """Converges each pool's live AgentWorker count to its admin-set desired count via Jenkins
@@ -535,13 +538,41 @@ def reconcile_agent_workers() -> dict:
     MAINFORTE_WORKER_ID/hostname-derived name) is excluded by construction, never by fragile "is
     this worker #1" detection.
 
+    Guarded by a Postgres advisory lock, transaction-scoped (pg_try_advisory_xact_lock): it
+    auto-releases on this db_session's own commit/rollback/close, so a crash between acquire and
+    an explicit unlock can never leak the lock onto a pooled connection for some later, unrelated
+    task to inherit (get_engine() pools connections; a session-scoped lock plus db.close() returning
+    the raw connection to the pool would do exactly that). The lock only needs to cover the read-
+    decide-act sequence for THIS tick, which is exactly one transaction's lifetime here. This exists
+    because during a rolling deploy, backbone's zero-downtime swap keeps the OLD app
+    container's in-process scheduler (main.py's lifespan) alive and ticking for as long as the NEW
+    container takes to become healthy -- confirmed in production 2026-09-30: `worker.provisioning`
+    events for full/sandbox workers 2 through 13 were emitted continuously from 13:00-13:12, all
+    while a NEW app container (mainforte-app-22065, started 13:08:43) was simultaneously already
+    destroying workers down to desired=1. Both processes' schedulers were reconciling the SAME
+    pools against the SAME desired count at the SAME time, so the old one kept provisioning
+    replacements for workers the new one had already destroyed (or vice versa) -- neither one's
+    view of `managed`/`live` ever accounted for the other's in-flight decision, because both read
+    then acted within their own separate `with db_session()` block with no coordination at all.
+    Skips (does not block) when the lock is already held, since this task recurs every 60s anyway
+    -- a held lock almost always means the other holder's own tick is still finishing, and next
+    tick will just try again.
+
     Fails soft (never raises) when Jenkins/bastion settings are unset, matching jenkins_ssh's own
     not_configured convention -- this task runs on every beat tick regardless of whether the
     reconciler has been set up for this environment yet."""
+    from sqlalchemy import text
+
     from mainforte.db_settings import get_bastion_jenkins_config
     from mainforte.jenkins_ssh import _is_configured
 
     with db_session() as db:
+        got_lock = db.execute(
+            text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": AGENT_WORKER_RECONCILE_LOCK_KEY}
+        ).scalar()
+        if not got_lock:
+            log.info("reconcile_agent_workers: skipped tick, another process already holds the reconcile lock")
+            return {"ok": False, "reason": "lock_held_elsewhere"}
         s = get_bastion_jenkins_config(db)
         if not _is_configured(s):
             return {"ok": False, "reason": "not_configured"}
