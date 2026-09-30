@@ -21,6 +21,21 @@ from mainforte.events.stream import last_id, read_after
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+# Tracked so `close_all_connections` (called from main.py's shutdown lifespan) can force-close
+# every open socket. Without this, a socket that's idle-but-open (client asleep/backgrounded)
+# just sits on `websocket.receive_text()` forever -- ASGI/uvicorn won't close an already-accepted
+# websocket for you on SIGTERM, so the deploy's connection-drain wait had nothing to actually
+# close a lingering connection and could hang past its own timeout.
+_connections: set[WebSocket] = set()
+
+
+async def close_all_connections() -> None:
+    for ws in list(_connections):
+        try:
+            await ws.close(code=1001)  # 1001 = going away
+        except Exception:
+            pass
+
 
 def _authorize(token: str, workspace_id: str) -> tuple[str, str] | None:
     with db_session() as db:
@@ -56,6 +71,7 @@ async def ws_endpoint(websocket: WebSocket, token: str, workspace_id: str, after
         return
     user_id, _real_id = auth
     await websocket.accept()
+    _connections.add(websocket)
 
     # 1. pin the stream position FIRST, then replay the gap from Postgres. Anything appended to the stream
     #    while we replay is picked up by the tail (starting at `stream_pos`) and de-duplicated by event id.
@@ -117,6 +133,7 @@ async def ws_endpoint(websocket: WebSocket, token: str, workspace_id: str, after
     except WebSocketDisconnect:
         pass
     finally:
+        _connections.discard(websocket)
         stop.set()
         t.cancel()
         await run_in_threadpool(_emit_conn, "connection.closed", workspace_id, user_id, {})
