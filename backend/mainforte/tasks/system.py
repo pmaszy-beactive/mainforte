@@ -354,7 +354,8 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         q = q.filter(~AgentWorker.container_name.like(f"{cfg['exclude_prefix']}%"))
     managed = sorted(q.all(), key=lambda w: _worker_sort_key(w.container_name, prefix))
 
-    stale = utcnow() - timedelta(seconds=90)
+    now_for_staleness = utcnow()
+    stale = now_for_staleness - timedelta(seconds=90)
     def is_stale(w: AgentWorker) -> bool:
         return w.status == "online" and (w.last_heartbeat or stale) <= stale
     live_workers = [w for w in managed if not is_stale(w)]
@@ -367,6 +368,29 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         pool, len(managed), live, desired, __version__,
         [(w.container_name, w.status, w.version, w.last_heartbeat.isoformat() if w.last_heartbeat else None)
          for w in managed],
+    )
+    # DEBUG (investigating unexplained pool churn -- 2026-09-30): every worker's staleness
+    # decision spelled out explicitly, every tick, not just when a stale row exists -- specifically
+    # to catch a worker whose heartbeat is landing close to the 90s cutoff, where DB replication
+    # lag, clock skew between the app container and whichever worker last wrote last_heartbeat, or
+    # simple bad luck in scheduling could flip is_stale() to True for a worker that is actually
+    # fine, making `live` undercount for exactly one tick -- enough to trigger a real, correct-per-
+    # its-own-logic `live < desired` provision call that then races the worker's next heartbeat.
+    # age_seconds is None only when last_heartbeat itself is None (a row that was inserted but has
+    # never actually heartbeat yet).
+    log.warning(
+        "reconcile_agent_workers[%s]: staleness_detail (cutoff=90s, now=%s) %s",
+        pool, now_for_staleness.isoformat(),
+        [
+            (
+                w.container_name,
+                w.status,
+                w.last_heartbeat.isoformat() if w.last_heartbeat else None,
+                round((now_for_staleness - w.last_heartbeat).total_seconds(), 2) if w.last_heartbeat else None,
+                is_stale(w),
+            )
+            for w in managed
+        ],
     )
     if stale_workers:
         # DEBUG (investigating unexplained pool churn -- 2026-09-30): a stale row (status="online"
@@ -469,7 +493,17 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
         return {"ok": True, "live": live, "desired": desired, "action": "none"}
 
     if live < desired:
-        log.info("reconcile_agent_workers[%s]: live=%s < desired=%s -> provisioning", pool, live, desired)
+        # DEBUG (investigating unexplained pool churn -- 2026-09-30): bumped to WARNING and paired
+        # with the staleness_detail log above -- if `live` undercounts because a genuinely healthy
+        # worker's row got flipped stale for one tick (heartbeat landed a hair over the 90s cutoff,
+        # clock skew, a slow DB write), this line fires immediately after staleness_detail shows
+        # exactly which row(s) were marked stale and by how much, on the SAME tick, so the two log
+        # lines together show the full "why did we decide to provision" chain.
+        log.warning(
+            "reconcile_agent_workers[%s]: live=%s < desired=%s -> provisioning "
+            "(stale_workers_this_tick=%s)",
+            pool, live, desired, [w.container_name for w in stale_workers],
+        )
         return _provision(db, s, pool, cfg, managed, to_add=min(desired - live, AGENT_WORKER_MAX_PROVISION_PER_TICK))
 
     # live > desired, no version drift: destroy the newest-named non-draining workers first, never
