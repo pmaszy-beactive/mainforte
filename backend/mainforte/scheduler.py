@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from celery.schedules import BaseSchedule, schedule as celery_schedule
 
@@ -32,6 +32,21 @@ from mainforte.celery_app import celery
 log = logging.getLogger(__name__)
 
 _POLL_INTERVAL_SECONDS = 5.0
+
+# Entries here get an extra hold-off after scheduler start before their first tick can fire at
+# all (on top of their own normal interval). Exists because backbone's zero-downtime deploy swap
+# keeps the OLD app container's scheduler alive and ticking for as long as the NEW container takes
+# to pass its health check -- confirmed in production 2026-09-30: both containers' schedulers ran
+# reconcile_agent_workers concurrently for several minutes, each blind to the other's decisions
+# (see the pg_try_advisory_xact_lock added in tasks/system.py, which makes a concurrent tick safe
+# but does not reduce how often one actually happens). Giving the NEW container's copy of this one
+# entry a 5-minute head start delay means the old container has that much more time to actually
+# exit before the new one starts making its own reconcile decisions, shrinking the overlap window
+# itself rather than only making it safe. Scoped to just this entry, not every scheduled task --
+# most others (worker_heartbeat, sweep_outbox, etc.) are harmless or actively needed immediately.
+_STARTUP_HOLDOFF_SECONDS: dict[str, float] = {
+    "reconcile-agent-workers": 300.0,
+}
 
 
 class InProcessScheduler:
@@ -57,7 +72,10 @@ class InProcessScheduler:
     def _loop(self) -> None:
         now = datetime.now(timezone.utc)
         for name in celery.conf.beat_schedule:
-            self._last_run_at[name] = now
+            holdoff = _STARTUP_HOLDOFF_SECONDS.get(name, 0.0)
+            self._last_run_at[name] = now + timedelta(seconds=holdoff)
+            if holdoff:
+                log.info("in-process scheduler: entry %r held off %ss after startup", name, holdoff)
         while not self._stop.is_set():
             self._tick()
             self._stop.wait(_POLL_INTERVAL_SECONDS)
@@ -66,6 +84,9 @@ class InProcessScheduler:
         now = datetime.now(timezone.utc)
         for name, entry in celery.conf.beat_schedule.items():
             last_run_at = self._last_run_at.get(name, now)
+            # A future last_run_at (from _loop's startup hold-off) makes remaining_estimate return
+            # more than the entry's own interval, so the `remaining > 0` check below already skips
+            # it correctly -- no separate hold-off branch needed here.
             sched = entry["schedule"]
             if not isinstance(sched, BaseSchedule):
                 sched = celery_schedule(sched)
