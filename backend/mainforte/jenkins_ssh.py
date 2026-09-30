@@ -19,6 +19,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import traceback
 from typing import Any
 
 logger = logging.getLogger("mainforte.jenkins_ssh")
@@ -118,18 +119,38 @@ def trigger_jenkins_build(db, job_name: str, params: dict[str, Any] | None = Non
     """Fire-and-forget: queues the build and returns once it's accepted."""
     from mainforte.db_settings import get_bastion_jenkins_config
 
+    # DEBUG (investigating unexplained pool churn -- 2026-09-30): every single call into this
+    # function, from ANY caller, with a full stack trace of who called it -- not just _provision's
+    # own internal logging (tasks/system.py), since the mystery is precisely that Jenkins builds
+    # keep firing with zero trace in _provision's own debug logs. If some OTHER code path (a worker
+    # process executing a task we haven't considered, an admin route, anything) calls this function
+    # directly, this line is the one place that will catch it regardless of which caller it is.
+    caller_stack = "".join(traceback.format_stack(limit=8))
+    logger.warning(
+        "trigger_jenkins_build CALLED: job=%s params=%s caller_stack:\n%s",
+        job_name, _redact_params(params), caller_stack,
+    )
+
     s = get_bastion_jenkins_config(db)
     if not _is_configured(s):
         logger.warning("Jenkins not configured — skipping build trigger for %s", job_name)
         return {"ok": False, "reason": "not_configured"}
 
-    cli_args = _build_ssh_cli_args(job_name, params)
+    # -v (verbose) without -s: still fire-and-forget (does not block on the build finishing), but
+    # makes the Jenkins CLI print the queue item URL/number it was assigned, which -p-only output
+    # does not include -- this is what lets a build's own console log/build number be traced back
+    # to this exact trigger call.
+    cli_args = _build_ssh_cli_args(job_name, params) + ["-v"]
     try:
         remote_cmd = _jenkins_cli_cmd(cli_args)
         result = _run_jenkins_ssh(s, remote_cmd, timeout=60)
         if result.returncode == 0:
-            logger.info("Jenkins build queued: %s with params %s", job_name, _redact_params(params))
-            return {"ok": True, "job": job_name, "params": params}
+            cli_output = (result.stdout or "").strip()
+            logger.info(
+                "Jenkins build queued: %s with params %s cli_output=%r",
+                job_name, _redact_params(params), cli_output[:2000],
+            )
+            return {"ok": True, "job": job_name, "params": params, "cli_output": cli_output}
         err = (result.stderr or result.stdout or "")[:500]
         logger.error("Jenkins build trigger failed for %s: %s", job_name, err)
         return {"ok": False, "reason": "cli_failed", "error": err}

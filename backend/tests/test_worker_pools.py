@@ -123,6 +123,29 @@ def test_recently_provisioned_outdated_worker_is_not_drained():
     trigger.assert_not_called()
 
 
+def test_worker_running_newer_version_is_not_outdated():
+    """Confirmed in production 2026-09-30: a deploy that took 9 minutes to swap left the OLD
+    container's reconciler alive well past its own startup hold-off, running alongside the NEW
+    container's. The old code compared versions with plain `!=`, so the old (stale) reconciler
+    classified every worker running the already-deployed NEWER version as "outdated" relative to
+    its own older __version__, reprovisioned replacements (which themselves booted on the new
+    image and got immediately reclassified too), and grew the pool without bound for as long as
+    the old process survived. A worker whose version is NEWER than this reconciler's own must
+    never be treated as outdated -- only strictly older versions are eligible."""
+    newer_worker = _worker("mainforte-agent-worker-2", version="99.0.0")  # far "newer" than __version__
+    db = _FakeDB(rows=[newer_worker])
+    db.settings["workers.desired"] = MagicMock(value={"full": 1, "sandbox": 0})
+    settings = MagicMock(jenkins_provision_job="provision-job", jenkins_destroy_job="destroy-job")
+
+    with patch("mainforte.tasks.system._recently_provisioned_names", return_value=set()):
+        with patch("mainforte.jenkins_ssh.trigger_jenkins_build") as trigger:
+            with patch("mainforte.tasks.system.emit"):
+                result = _reconcile_pool(db, settings, "full", AGENT_WORKER_POOLS["full"])
+
+    assert result["action"] == "none"
+    trigger.assert_not_called()
+
+
 def test_outdated_worker_past_grace_window_is_drained():
     """Once the grace window has expired, an outdated worker is fair game for drain again --
     the fix only defers the destroy branches, it never grants permanent immunity."""

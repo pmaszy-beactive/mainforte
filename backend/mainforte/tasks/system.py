@@ -18,6 +18,19 @@ from mainforte.events.bus import dispatch, to_dict
 
 log = logging.getLogger(__name__)
 
+
+def _version_tuple(v: str | None) -> tuple[int, ...]:
+    """Parses 'MAJOR.MINOR.PATCH' into a comparable tuple. Falls back to (0,) (sorts oldest) for
+    anything unparseable, so a garbage/missing version never wins a comparison it should not."""
+    if not v:
+        return (0,)
+    parts: list[int] = []
+    for p in v.split("."):
+        if not p.isdigit():
+            return (0,)
+        parts.append(int(p))
+    return tuple(parts) or (0,)
+
 WORKER_ID = os.environ.get("MAINFORTE_WORKER_ID") or f"w-{socket.gethostname()}"
 ROLLUP_MODEL = "claude-haiku-4-5-20251001"
 
@@ -419,24 +432,41 @@ def _reconcile_pool(db, s, pool: str, cfg: dict) -> dict:
     # before a stale/lagging version tag propagates gets immediately drained and destroyed, its
     # replacement repeats the same race, and the pool churns forever instead of settling -- this is
     # the bug the debug logging above was added to confirm.
+    # STRICTLY older than this reconciler's own version, never merely "different" -- confirmed in
+    # production 2026-09-30: a deploy that took 9 minutes to swap left the OLD (0.1.56) container's
+    # scheduler alive and reconciling well past its own 5-minute startup hold-off, and the old
+    # code's `!= __version__` check made it treat every worker running the NEW, already-deployed
+    # 0.1.57 image as "outdated" simply because 0.1.57 != 0.1.56 -- there is no way for a plain
+    # inequality to know which side is actually stale. It then endlessly reprovisioned replacements
+    # (which booted running the new 0.1.57 image, since that is what the image build actually
+    # produces) and immediately reclassified each one as outdated too, forever, for as long as the
+    # old process survived -- explaining the unbounded managed-count growth (13 -> 19+) we watched
+    # live. Comparing version TUPLES and only ever calling a worker outdated when its version is
+    # older than __version__ makes the old reconciler correctly see the new workers as current
+    # (nothing to replace) while the new reconciler still correctly retires any genuinely old one --
+    # breaking the war regardless of how long the two processes actually overlap for.
+    __version_tuple = _version_tuple(__version__)
     recently_provisioned = _recently_provisioned_names(db, cfg["prefix"])
     outdated = [
         w for w in live_workers
-        if w.status != "draining" and w.version and w.version != __version__
+        if w.status != "draining" and w.version and _version_tuple(w.version) < __version_tuple
         and w.container_name not in recently_provisioned
     ]
     draining = [w for w in live_workers if w.status == "draining"]
 
     if outdated:
         log.info(
-            "reconcile_agent_workers[%s]: outdated=%s (each: worker_version != reconciler_version=%s) "
+            "reconcile_agent_workers[%s]: outdated=%s (each: worker_version older than reconciler_version=%s) "
             "provisioning_events_last_%ss=%s",
             pool, [(w.container_name, w.version) for w in outdated], __version__,
             AGENT_WORKER_PROVISION_GRACE_SECONDS, sorted(recently_provisioned),
         )
 
     if outdated and live >= desired:
-        current_count = sum(1 for w in live_workers if w.version == __version__)
+        # Not-outdated, i.e. version >= this reconciler's own -- not `== __version__`, so a worker
+        # already running something newer than this process (the other side of the same race this
+        # whole fix is for) still counts as "good enough" rather than being forced to match exactly.
+        current_count = sum(1 for w in live_workers if w.version and _version_tuple(w.version) >= __version_tuple)
         if current_count < desired:
             log.info(
                 "reconcile_agent_workers[%s]: current_count=%s < desired=%s -> provisioning replacement(s) "
