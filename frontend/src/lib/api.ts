@@ -149,6 +149,14 @@ export const api = {
       post<void>(`/api/workspaces/${encodeURIComponent(id)}/chat/cancel`, b),
     uploadUrl: (id: string) => `${API_URL}/api/workspaces/${encodeURIComponent(id)}/uploads`,
   },
+  drafts: {
+    get: (wsId: string, threadId: string) =>
+      get<{ text: string; updated_at: string | null }>(
+        `/api/workspaces/${encodeURIComponent(wsId)}/drafts/${encodeURIComponent(threadId)}`,
+      ),
+    save: (wsId: string, threadId: string, text: string) =>
+      put<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(wsId)}/drafts/${encodeURIComponent(threadId)}`, { text }),
+  },
   tasks: {
     get: (wsId: string, taskId: string) =>
       get<Task>(`/api/workspaces/${encodeURIComponent(wsId)}/tasks/${encodeURIComponent(taskId)}`),

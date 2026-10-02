@@ -100,6 +100,7 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
               ))}
             <Composer
               workspaceId={workspaceId}
+              threadId={threadId ?? "global"}
               draftKey={`${workspaceId ?? "-"}:${threadId ?? "global"}`}
               streaming={streaming.length > 0}
               stopping={cancel.isPending}

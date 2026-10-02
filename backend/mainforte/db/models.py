@@ -149,6 +149,22 @@ class ClientMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class ComposerDraft(Base):
+    """Server-side backstop for the chat composer's draft text, so an in-progress message
+    survives a device switch or cleared browser, not just the frontend's own localStorage copy
+    (stores/ui.ts). One row per (user, workspace, thread); thread_id is "global" for the
+    no-thread-selected composer, matching the frontend's own `threadId ?? "global"` key shape
+    exactly so client and server agree on what slot a draft belongs to."""
+
+    __tablename__ = "composer_drafts"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    ws_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class Upload(IdMixin, Base):
     """A file a human attached (or a persona produced). Bytes live in storage under `key`.
     `extracted_text` is populated at upload time for text-extractable types (PDFs, etc) so the

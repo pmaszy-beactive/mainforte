@@ -10,12 +10,13 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from mainforte.auth.deps import Identity, current_identity, require_membership
 from mainforte.chat.attachments import extract_text
 from mainforte.db.base import utcnow
-from mainforte.db.models import ClientMessage, MemoryChunk, Upload
+from mainforte.db.models import ClientMessage, ComposerDraft, MemoryChunk, Upload
 from mainforte.db.session import get_db
 from mainforte.events import emit
 from mainforte.ids import new_id
@@ -52,6 +53,10 @@ class FeedbackIn(BaseModel):
 class CancelIn(BaseModel):
     thread_id: str | None = None
     correlation_id: str | None = None
+
+
+class DraftIn(BaseModel):
+    text: str = Field(default="", max_length=20_000)
 
 
 def _upload_out(u: Upload) -> dict:
@@ -152,3 +157,33 @@ def cancel(workspace_id: str, body: CancelIn, ident: Identity = Depends(current_
     ev = emit(db, "persona.reply.cancel_requested", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
               correlation_id=body.correlation_id or body.thread_id, payload={"target": target})
     return {"event_id": ev["id"]}
+
+
+@router.get("/drafts/{thread_id}")
+def get_draft(workspace_id: str, thread_id: str, ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    """Server-side backstop for the composer draft (frontend's own localStorage copy is the
+    fast path; this is what lets a draft survive a device switch or cleared browser)."""
+    ws = require_membership(workspace_id, ident, db)
+    row = db.get(ComposerDraft, (ident.user.id, ws.id, thread_id))
+    return {"text": row.text if row else "", "updated_at": row.updated_at if row else None}
+
+
+@router.put("/drafts/{thread_id}")
+def put_draft(workspace_id: str, thread_id: str, body: DraftIn, ident: Identity = Depends(current_identity),
+             db: Session = Depends(get_db)):
+    ws = require_membership(workspace_id, ident, db)
+    if not body.text:
+        db.query(ComposerDraft).filter_by(user_id=ident.user.id, ws_id=ws.id, thread_id=thread_id).delete()
+        db.commit()
+        return {"ok": True}
+
+    now = utcnow()
+    stmt = pg_insert(ComposerDraft).values(
+        user_id=ident.user.id, ws_id=ws.id, thread_id=thread_id, text=body.text, updated_at=now,
+    ).on_conflict_do_update(
+        index_elements=["user_id", "ws_id", "thread_id"],
+        set_={"text": body.text, "updated_at": now},
+    )
+    db.execute(stmt)
+    db.commit()
+    return {"ok": True}
