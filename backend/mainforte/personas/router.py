@@ -309,9 +309,6 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                      user: User | None = None) -> None:
     arche = catalog.get(persona.slug)
     base = arche.system_prompt if arche else "You are a helpful assistant."
-    with db_session() as db:
-        system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base, user=user,
-                                      recall_query=user_text)
     started = emit_ephemeral(
         "persona.reply.started", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
         correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id},
@@ -323,7 +320,19 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
     canceled = False
     usage_sink: dict[str, int] = {}
     convo = list(history)
+    system = ""
     try:
+        # Inside the try (not above it, as before): a crash here used to escape this function
+        # entirely -- no persona.reply.error ever got emitted, so the admin Work Log showed the
+        # turn stuck at "in_flight" forever instead of "error", with the only trace of the failure
+        # being that one worker container's own stdout, gone the moment it's replaced. Confirmed
+        # live 2026-10-02: a brand-new thread's first message (thread_id=None) crashed inside
+        # build_system_prompt -> search_memory -> search_interaction_log on a Postgres
+        # AmbiguousParameter error (fixed separately in events/governor.py), and the reply was
+        # simply lost with zero durable record of why.
+        with db_session() as db:
+            system = build_system_prompt(db, ws_id=ws_id, persona=persona, base=base, user=user,
+                                          recall_query=user_text)
         if api_key is None:
             full = _fallback_text(persona, user_text)
             _emit_reply_debug(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
