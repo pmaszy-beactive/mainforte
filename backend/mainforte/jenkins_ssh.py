@@ -19,7 +19,6 @@ import os
 import shlex
 import subprocess
 import tempfile
-import traceback
 from typing import Any
 
 logger = logging.getLogger("mainforte.jenkins_ssh")
@@ -118,18 +117,6 @@ def _build_ssh_cli_args(job_name: str, params: dict[str, Any] | None = None, wai
 def trigger_jenkins_build(db, job_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Fire-and-forget: queues the build and returns once it's accepted."""
     from mainforte.db_settings import get_bastion_jenkins_config
-
-    # DEBUG (investigating unexplained pool churn -- 2026-09-30): every single call into this
-    # function, from ANY caller, with a full stack trace of who called it -- not just _provision's
-    # own internal logging (tasks/system.py), since the mystery is precisely that Jenkins builds
-    # keep firing with zero trace in _provision's own debug logs. If some OTHER code path (a worker
-    # process executing a task we haven't considered, an admin route, anything) calls this function
-    # directly, this line is the one place that will catch it regardless of which caller it is.
-    caller_stack = "".join(traceback.format_stack(limit=8))
-    logger.warning(
-        "trigger_jenkins_build CALLED: job=%s params=%s caller_stack:\n%s",
-        job_name, _redact_params(params), caller_stack,
-    )
 
     s = get_bastion_jenkins_config(db)
     if not _is_configured(s):
