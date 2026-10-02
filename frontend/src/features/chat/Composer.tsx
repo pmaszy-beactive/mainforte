@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Paperclip, SendHorizontal, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
+import { api } from "@/lib/api";
 import { useUi } from "@/stores/ui";
 import { useAttachments } from "@/stores/attachments";
 import { cn } from "@/lib/cn";
@@ -9,6 +11,7 @@ import { AttachmentTray } from "./AttachmentTray";
 
 interface Props {
   workspaceId: string | null;
+  threadId: string;
   draftKey: string;
   streaming: boolean;
   stopping?: boolean;
@@ -17,8 +20,9 @@ interface Props {
 }
 
 const ACCEPT = "image/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
+const DRAFT_SAVE_DEBOUNCE_MS = 1500;
 
-export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, onSend }: Props) {
+export function Composer({ workspaceId, threadId, draftKey, streaming, stopping, onStop, onSend }: Props) {
   const { t } = useTranslation();
   const text = useUi((s) => s.drafts[draftKey] ?? "");
   const setDraft = useUi((s) => s.setDraft);
@@ -30,6 +34,30 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
   const fileInput = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const disabled = !workspaceId;
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Fetch-on-mount server backstop: only seeds the draft when this device has nothing local yet,
+  // so a stale/older server value never clobbers an in-progress local edit.
+  const { data: serverDraft } = useQuery({
+    queryKey: ["draft", workspaceId, threadId],
+    queryFn: () => api.drafts.get(workspaceId!, threadId),
+    enabled: !!workspaceId,
+    staleTime: Infinity,
+  });
+  useEffect(() => {
+    if (serverDraft?.text && !useUi.getState().drafts[draftKey]) {
+      setDraft(draftKey, serverDraft.text);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverDraft, draftKey]);
+
+  const saveDraft = (value: string) => {
+    if (!workspaceId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      api.drafts.save(workspaceId, threadId, value).catch(() => {});
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+  };
 
   // Auto-grow the textarea with content instead of scrolling inside a fixed box.
   useEffect(() => {
@@ -57,6 +85,8 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
     if (!canSend) return;
     onSend(text.trim(), localIds.filter((id) => items[id]));
     setDraft(draftKey, "");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (workspaceId) api.drafts.save(workspaceId, threadId, "").catch(() => {});
     setLocalIds([]);
     setJustSent(true);
   };
@@ -101,7 +131,10 @@ export function Composer({ workspaceId, draftKey, streaming, stopping, onStop, o
           rows={1}
           value={text}
           disabled={disabled}
-          onChange={(e) => setDraft(draftKey, e.target.value)}
+          onChange={(e) => {
+            setDraft(draftKey, e.target.value);
+            saveDraft(e.target.value);
+          }}
           onKeyDown={onKey}
           onPaste={onPaste}
           placeholder={t("chat.placeholder")}
