@@ -119,6 +119,26 @@ export interface Widget {
   url: string;
 }
 
+/** `UploadResult` plus the fields only the uploads-list endpoint returns. */
+export interface LibraryUpload extends UploadResult {
+  created_at: string;
+}
+
+export interface Site {
+  id: string;
+  name: string;
+  slug: string;
+  brief: string;
+  created_at: string;
+  preview_url: string;
+  status_label: string;
+  stage: "draft" | "published";
+  can_publish: boolean;
+  has_error: boolean;
+  is_destroying: boolean;
+  published_url?: string;
+}
+
 /* Admin */
 export interface AdminUser {
   id: string;

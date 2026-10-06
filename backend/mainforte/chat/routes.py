@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from mainforte.auth.deps import Identity, current_identity, require_membership
 from mainforte.chat.attachments import extract_text
@@ -25,7 +26,7 @@ from mainforte.storage import get_storage, upload_key
 router = APIRouter(prefix="/api/workspaces/{workspace_id}", tags=["chat"])
 
 MAX_UPLOAD = 25 * 1024 * 1024
-ALLOWED_PREFIXES = ("image/", "text/", "application/pdf", "application/json", "text/csv",
+ALLOWED_PREFIXES = ("image/", "video/", "text/", "application/pdf", "application/json", "text/csv",
                     "application/vnd.openxmlformats-officedocument", "application/zip",
                     "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint")
 
@@ -41,7 +42,9 @@ class MessageIn(BaseModel):
     client_msg_id: str = Field(min_length=8, max_length=64)
     thread_id: str | None = None
     text: str = Field(default="", max_length=20_000)
-    attachments: list[AttachmentRef] = []
+    # T02790: the composer caps attachments per message client-side; this mirrors that limit
+    # server-side so a direct/malformed POST can't bypass it.
+    attachments: list[AttachmentRef] = Field(default=[], max_length=10)
 
 
 class FeedbackIn(BaseModel):
@@ -78,8 +81,12 @@ async def upload(workspace_id: str, file: UploadFile = File(...), ident: Identit
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"unsupported type {ctype}")
     uid = new_id()
     key = upload_key(ident.user.id, uid, file.filename or "file")
-    stored = get_storage().put(key, data, ctype)
-    extracted = extract_text(content_type=ctype, data=data)
+    # get_storage().put() is a blocking network call (BackboneS3's sync httpx client); run it off
+    # the event loop so one large upload's S3 PUT doesn't stall every other concurrent request
+    # this worker process is handling (ticket T02791 -- "stuck at 100%" is consistent with a
+    # second request queued behind a blocked event loop, not just this upload's own latency).
+    stored = await run_in_threadpool(get_storage().put, key, data, ctype)
+    extracted = await run_in_threadpool(extract_text, content_type=ctype, data=data)
     now = utcnow()
     up = Upload(id=uid, ws_id=ws.id, user_id=ident.user.id, key=key, name=file.filename or "file",
                 content_type=ctype, size=stored.size, sha256=stored.sha256, extracted_text=extracted,
@@ -104,6 +111,33 @@ def get_upload(workspace_id: str, upload_id: str, ident: Identity = Depends(curr
         raise HTTPException(status.HTTP_404_NOT_FOUND, "object missing")
     return Response(content=data, media_type=up.content_type,
                     headers={"Cache-Control": "private, max-age=3600", "Content-Disposition": f'inline; filename="{up.name}"'})
+
+
+@router.get("/uploads")
+def list_uploads(workspace_id: str, ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    ws = require_membership(workspace_id, ident, db)
+    rows = db.query(Upload).filter_by(ws_id=ws.id).order_by(Upload.created_at.desc()).all()
+    return [{**_upload_out(u), "created_at": u.created_at.isoformat()} for u in rows]
+
+
+@router.delete("/uploads/{upload_id}", status_code=204)
+def delete_upload(workspace_id: str, upload_id: str, ident: Identity = Depends(current_identity),
+                   db: Session = Depends(get_db)):
+    ws = require_membership(workspace_id, ident, db)
+    up = db.get(Upload, upload_id)
+    if not up or up.ws_id != ws.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    # Storage.delete() is idempotent (both LocalStorage/BackboneS3 no-op cleanly on a missing key),
+    # so it's safe to call even if a prior delete already removed the object.
+    get_storage().delete(up.key)
+    # No FK between MemoryChunk.source_id and Upload.id -- must drop this explicitly, or a deleted
+    # upload's text stays searchable/retrievable (chat/routes.py's attachment_context path, and
+    # personas/recall.py's search_memory) even though the file itself is gone.
+    db.query(MemoryChunk).filter_by(source_type="upload", source_id=upload_id).delete()
+    db.delete(up)
+    emit(db, "upload.deleted", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
+         payload={"upload_id": upload_id, "name": up.name})
+    return None
 
 
 @router.post("/chat", status_code=201)
@@ -131,6 +165,16 @@ def post_message(workspace_id: str, body: MessageIn, ident: Identity = Depends(c
         thread_id = new_id()
         emit(db, "chat.thread.created", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
              payload={"thread_id": thread_id, "kind": "global"})
+
+    # The upload's thread isn't known until the message referencing it is posted (uploads happen
+    # before send); backfill it on the chunk so attachment retrieval can be scoped to this thread
+    # instead of matching text from every file ever shared in the workspace.
+    if body.attachments:
+        (
+            db.query(MemoryChunk)
+            .filter(MemoryChunk.source_type == "upload", MemoryChunk.source_id.in_([a.id for a in body.attachments]))
+            .update({"thread_id": thread_id}, synchronize_session=False)
+        )
     ev = emit(db, "chat.message.created", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
               correlation_id=thread_id,
               payload={"thread_id": thread_id, "text": body.text, "attachments": atts, "client_msg_id": body.client_msg_id})

@@ -18,10 +18,12 @@ import type {
   BillingSubscription,
   ChatPostResponse,
   Connection,
+  LibraryUpload,
   Me,
   MarketplaceListing,
   MarketplaceListingIn,
   MarketplaceOrder,
+  Site,
   Task,
   Widget,
   Workspace,
@@ -50,6 +52,20 @@ function qs(q?: Query): string {
   return s ? `?${s}` : "";
 }
 
+/** FastAPI's automatic request-validation errors (422s, e.g. pydantic's EmailStr rejecting the
+ * email field) shape `detail` as an array of {loc, msg, type}, not the plain string every
+ * explicit `HTTPException(status, "...")` in this backend uses -- without this, those errors fell
+ * through to `res.statusText` ("Unprocessable Entity") instead of pydantic's actual, specific
+ * message (ticket T02742). */
+function detailMessage(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((e) => (e && typeof e === "object" && "msg" in e ? String((e as { msg: unknown }).msg) : null)).filter((m): m is string => !!m);
+    return msgs.length ? msgs.join(" ") : null;
+  }
+  return null;
+}
+
 async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
@@ -76,8 +92,7 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   }
   if (!res.ok) {
     const d = data as { detail?: unknown; message?: string } | undefined;
-    const msg =
-      (typeof d?.detail === "string" && d.detail) || d?.message || (typeof data === "string" && data) || res.statusText;
+    const msg = detailMessage(d?.detail) || d?.message || (typeof data === "string" && data) || res.statusText;
     throw new ApiError(res.status, msg || `HTTP ${res.status}`, data);
   }
   return data as T;
@@ -87,6 +102,7 @@ const get = <T>(path: string, query?: Query) => request<T>("GET", path, undefine
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {});
 const patch = <T>(path: string, body: unknown) => request<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => request<T>("PUT", path, body);
+const del = <T>(path: string) => request<T>("DELETE", path);
 
 /** True when a failed request should be retried (network, 5xx, 408, 429). */
 export function isRetryable(e: unknown): boolean {
@@ -134,7 +150,7 @@ export const api = {
     register: (b: { platform: string; token: string }) => post<void>("/api/push/register", b),
   },
   me: Object.assign(() => get<Me>("/api/me"), {
-    update: (b: { locale?: string; timezone?: string }) => patch<Me>("/api/me", b),
+    update: (b: { name?: string; locale?: string; timezone?: string }) => patch<Me>("/api/me", b),
   }),
   workspaces: {
     list: () => get<Workspace[]>("/api/workspaces"),
@@ -169,6 +185,20 @@ export const api = {
   },
   widgets: {
     list: (wsId: string) => get<Widget[]>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets`),
+    remove: (wsId: string, widgetId: string) =>
+      del<void>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets/${encodeURIComponent(widgetId)}`),
+  },
+  sites: {
+    list: (wsId: string) => get<Site[]>(`/api/workspaces/${encodeURIComponent(wsId)}/sites`),
+    destroy: (wsId: string, siteId: string) =>
+      post<{ ok: boolean; site_id: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/sites/${encodeURIComponent(siteId)}/destroy`),
+  },
+  library: {
+    uploads: {
+      list: (wsId: string) => get<LibraryUpload[]>(`/api/workspaces/${encodeURIComponent(wsId)}/uploads`),
+      remove: (wsId: string, uploadId: string) =>
+        del<void>(`/api/workspaces/${encodeURIComponent(wsId)}/uploads/${encodeURIComponent(uploadId)}`),
+    },
   },
   billing: {
     get: (wsId: string) => get<BillingState>(`/api/workspaces/${encodeURIComponent(wsId)}/billing`),

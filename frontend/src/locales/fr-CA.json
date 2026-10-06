@@ -168,10 +168,12 @@
   "app": {
     "rail": {
       "collapse": "Réduire la barre latérale",
-      "expand": "Agrandir la barre latérale"
+      "expand": "Agrandir la barre latérale",
+      "workspace": "Espace de travail"
     },
     "widgets": {
       "title": "Widgets",
+      "titleCount": "Widgets ({{count}})",
       "empty": "Aucun widget pour l'instant",
       "emptyHint": "Les résultats produits par votre personnel apparaîtront ici."
     },
@@ -179,10 +181,13 @@
       "title": "Votre personnel",
       "global": "Canal global",
       "invite": "Inviter",
+      "invitePlaceholder": "collegue@entreprise.com",
+      "inviteSubmit": "Envoyer l'invitation",
       "empty": "Aucun personnel pour l'instant",
       "emptyHint": "Invitez un concierge pour commencer."
     },
     "profile": {
+      "library": "Bibliothèque",
       "billing": "Facturation",
       "settings": "Réglages",
       "logout": "Se déconnecter",
@@ -230,7 +235,9 @@
     "attach": "Joindre un fichier",
     "removeAttachment": "Retirer la pièce jointe",
     "dropHint": "Déposez des fichiers pour les joindre",
+    "attachmentLimit": "Maximum {{max}} fichiers par message",
     "uploading": "Téléversement… {{pct}} %",
+    "uploadSlow": "Ça prend plus de temps que prévu",
     "uploadFailed": "Échec du téléversement",
     "uploadRetry": "Réessayer le téléversement",
     "tooLarge": "Trop volumineux (max 25 Mo)",
@@ -247,6 +254,8 @@
     "language": "Langue",
     "timezone": "Fuseau horaire",
     "workspaces": "Espaces de travail",
+    "editName": "Modifier le nom",
+    "nameSaveFailed": "Impossible d'enregistrer votre nom.",
     "connections": {
       "title": "Connexions",
       "subtitle": "Laissez votre personnel agir en votre nom via ces comptes.",
@@ -284,7 +293,8 @@
       "onFile": "Carte enregistrée.",
       "save": "Enregistrer la carte",
       "saving": "Enregistrement…",
-      "saved": "Carte enregistrée."
+      "saved": "Carte enregistrée.",
+      "unavailable": "Les paiements ne sont pas disponibles pour le moment. Veuillez contacter le soutien."
     },
     "subscribe": "S'abonner",
     "subscribing": "Abonnement en cours…",
@@ -296,6 +306,27 @@
     "requiresAction": "Votre paiement nécessite une vérification supplémentaire.",
     "confirmAction": "Confirmer le paiement",
     "placeholder": "La carte, les factures et l'utilisation apparaîtront ici une fois la facturation activée."
+  },
+  "library": {
+    "title": "Bibliothèque",
+    "subtitle": "Fichiers partagés et éléments produits par votre personnel.",
+    "tabs": {
+      "in": "Reçus",
+      "out": "Produits"
+    },
+    "delete": "Supprimer",
+    "deleteConfirm": "Supprimer?",
+    "in": {
+      "empty": "Aucun fichier pour l'instant.",
+      "emptyHint": "Les fichiers que vous joignez dans le clavardage apparaîtront ici."
+    },
+    "out": {
+      "empty": "Rien n'a encore été produit.",
+      "emptyHint": "Les widgets et sites créés par votre personnel apparaîtront ici.",
+      "widget": "Widget",
+      "site": "Site",
+      "alreadyDestroying": "Suppression en cours…"
+    }
   },
   "admin": {
     "badge": "Admin",

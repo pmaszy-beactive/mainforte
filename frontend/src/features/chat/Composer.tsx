@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useUi } from "@/stores/ui";
 import { useAttachments } from "@/stores/attachments";
 import { cn } from "@/lib/cn";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/upload";
 import { AttachmentTray } from "./AttachmentTray";
 
 interface Props {
@@ -19,7 +20,7 @@ interface Props {
   onSend: (text: string, attachmentLocalIds: string[]) => void;
 }
 
-const ACCEPT = "image/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
+const ACCEPT = "image/*,video/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
 const DRAFT_SAVE_DEBOUNCE_MS = 1500;
 
 export function Composer({ workspaceId, threadId, draftKey, streaming, stopping, onStop, onSend }: Props) {
@@ -31,10 +32,12 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
   const [localIds, setLocalIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [justSent, setJustSent] = useState(false);
+  const [limitHit, setLimitHit] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const disabled = !workspaceId;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const limitHitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Fetch-on-mount server backstop: only seeds the draft when this device has nothing local yet,
   // so a stale/older server value never clobbers an in-progress local edit.
@@ -75,11 +78,23 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
 
   const addFiles = (files: FileList | File[] | null | undefined) => {
     if (!workspaceId || !files) return;
-    const ids = Array.from(files).map((f) => add(workspaceId, f));
+    const incoming = Array.from(files);
+    const room = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - localIds.length);
+    const accepted = incoming.slice(0, room);
+    if (incoming.length > accepted.length) {
+      setLimitHit(true);
+      if (limitHitTimer.current) clearTimeout(limitHitTimer.current);
+      limitHitTimer.current = setTimeout(() => setLimitHit(false), 4000);
+    }
+    const ids = accepted.map((f) => add(workspaceId, f));
     if (ids.length) setLocalIds((l) => [...l, ...ids]);
   };
 
-  const canSend = !disabled && (text.trim().length > 0 || localIds.length > 0);
+  const uploading = localIds.some((id) => items[id]?.status === "uploading");
+  // The Send button itself is swapped for Stop while streaming (below), but the textarea stays
+  // enabled and Enter still called submit() regardless -- canSend must also gate on `streaming`
+  // so pressing Enter during a reply can't queue a second message (ticket T02788).
+  const canSend = !disabled && !uploading && !streaming && (text.trim().length > 0 || localIds.length > 0);
 
   const submit = () => {
     if (!canSend) return;
@@ -120,6 +135,9 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
       className={cn("glass rounded-2xl p-2 transition focus-within:border-ember-500/40", dragging && "border-ember-500/60 bg-ember-500/5")}
     >
       {dragging && <div className="px-2.5 pb-1 text-xs text-ember-300">{t("chat.dropHint")}</div>}
+      {limitHit && (
+        <div className="px-2.5 pb-1 text-xs text-amber-300">{t("chat.attachmentLimit", { max: MAX_ATTACHMENTS_PER_MESSAGE })}</div>
+      )}
       <AttachmentTray localIds={localIds} onRemove={(id) => setLocalIds((l) => l.filter((x) => x !== id))} />
       <div className="flex items-end gap-1.5">
         <input ref={fileInput} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />

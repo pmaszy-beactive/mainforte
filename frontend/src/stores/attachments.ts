@@ -18,6 +18,9 @@ export interface PendingAttachment {
   progress: number; // 0..1
   status: UploadStatus;
   attempts: number;
+  /** Date.now() of the current upload attempt's start, so the UI can offer an unstick affordance
+   * if "uploading" drags on far longer than usual (ticket T02791). */
+  uploadStartedAt: number | null;
   /** i18n key or raw server message */
   error: string | null;
   result: UploadResult | null;
@@ -51,7 +54,7 @@ export const useAttachments = create<AttachmentsState>()((set, get) => {
     for (;;) {
       const item = get().items[localId];
       if (!item || c.aborted) return;
-      patch(localId, { status: "uploading", progress: 0, attempts: item.attempts + 1 });
+      patch(localId, { status: "uploading", progress: 0, attempts: item.attempts + 1, uploadStartedAt: Date.now() });
       try {
         const result = await uploadXhr(item.workspaceId, c.file, (p) => patch(localId, { progress: p }), (x) => (c.xhr = x));
         patch(localId, { status: "done", progress: 1, result, error: null });
@@ -77,7 +80,7 @@ export const useAttachments = create<AttachmentsState>()((set, get) => {
     items: {},
     add: (workspaceId, file) => {
       const localId = newId();
-      const objectUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+      const objectUrl = file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : null;
       const item: PendingAttachment = {
         localId,
         workspaceId,
@@ -88,6 +91,7 @@ export const useAttachments = create<AttachmentsState>()((set, get) => {
         progress: 0,
         status: "uploading",
         attempts: 0,
+        uploadStartedAt: null,
         error: null,
         result: null,
       };

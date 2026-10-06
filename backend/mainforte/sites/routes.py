@@ -15,7 +15,7 @@ from mainforte.auth.passwords import token_hash
 from mainforte.db.session import get_db
 from mainforte.events import emit
 from mainforte.sites import service as site_service
-from mainforte.sites.provisioning import handle_callback, trigger_provision
+from mainforte.sites.provisioning import handle_callback, trigger_destroy, trigger_provision
 
 router = APIRouter(tags=["sites"])
 
@@ -70,6 +70,24 @@ def publish_site(site_id: str, ident: Identity = Depends(current_identity), db: 
          payload={"site_id": site.id, "slug": site.slug})
     db.commit()
     return site_service.site_out(site)
+
+
+@router.post("/api/workspaces/{workspace_id}/sites/{site_id}/destroy")
+def destroy_site(workspace_id: str, site_id: str, ident: Identity = Depends(current_identity),
+                  db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Workspace-scoped equivalent of admin/routes.py's destroy_site (same trigger_destroy call,
+    same status=destroying treatment -- the row isn't deleted, only torn down, for audit/history,
+    matching how the admin route documents it) -- membership-gated instead of superuser-only, for
+    the Library page's delete action."""
+    require_membership(workspace_id, ident, db)
+    site = site_service.get_site(db, site_id)
+    if not site or site.ws_id != workspace_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "site not found")
+
+    site.status = "destroying"
+    trigger_destroy(db, site=site)
+    db.commit()
+    return {"ok": True, "site_id": site.id}
 
 
 class CallbackBody(BaseModel):

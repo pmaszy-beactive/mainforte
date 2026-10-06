@@ -25,7 +25,7 @@ export function HistoryDropdown() {
         <History className="size-4" /> <span className="hidden sm:inline">{t("chat.history")}</span> <ChevronDown className="size-3.5" />
       </Button>
       {open && (
-        <div className="glass absolute right-0 top-full z-20 mt-1.5 w-64 rounded-xl p-1.5 animate-fade-up">
+        <div className="glass absolute right-0 top-full z-20 mt-1.5 w-64 rounded-xl bg-ink-950/95 p-1.5 animate-fade-up">
           {threads.length === 0 ? (
             <p className="px-2.5 py-3 text-center text-xs text-fog-700">{t("chat.historyEmpty")}</p>
           ) : (

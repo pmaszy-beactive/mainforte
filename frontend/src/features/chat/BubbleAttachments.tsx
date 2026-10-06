@@ -23,11 +23,17 @@ export function BubbleAttachments({ attachments, mine }: { attachments: Attachme
       {attachments.map((a) => {
         const src = resolve(a);
         const isImage = a.content_type?.startsWith("image/");
+        const isVideo = a.content_type?.startsWith("video/");
         if (isImage && src) {
           return (
             <button key={a.localId ?? a.id} type="button" onClick={() => open(src, a.name)} className="overflow-hidden rounded-xl ring-1 ring-white/10 ring-focus">
               <img src={src} alt={a.name} loading="lazy" className="max-h-64 max-w-full object-cover" />
             </button>
+          );
+        }
+        if (isVideo && src) {
+          return (
+            <video key={a.localId ?? a.id} src={src} controls preload="metadata" className="max-h-64 max-w-full rounded-xl ring-1 ring-white/10" />
           );
         }
         const chip = (

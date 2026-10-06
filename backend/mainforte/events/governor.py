@@ -190,7 +190,7 @@ def search_interaction_log(db, *, ws_id: str, query: str, thread_id: str | None 
             where ws_id = :ws_id
               and type in ('chat.message.created', 'persona.reply.ended')
               and text_fts @@ plainto_tsquery('english', :query)
-              and (:thread_id::varchar is null or correlation_id = :thread_id::varchar)
+              and (cast(:thread_id as varchar) is null or correlation_id = cast(:thread_id as varchar))
             order by rank desc, id desc
             limit :limit
             """

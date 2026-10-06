@@ -85,11 +85,11 @@ function LocalStatus({ clientMsgId, status, error }: { clientMsgId: string; stat
   if (status === "failed") {
     const reason = error === "attachmentLost" ? t("chat.attachmentLost") : error === "uploadFailed" ? t("chat.uploadFailed") : error;
     return (
-      <span className="inline-flex items-center gap-1.5 text-red-900">
+      <span className="inline-flex items-center gap-1.5 text-red-300">
         <AlertCircle className="size-3" />
         <span title={reason ?? undefined}>{t("chat.failed")}</span>
         <button
-          className="font-semibold underline underline-offset-2"
+          className="font-semibold underline underline-offset-2 ring-focus rounded-sm hover:text-red-100"
           onClick={() => {
             retry(clientMsgId);
             kickSender();
@@ -97,7 +97,10 @@ function LocalStatus({ clientMsgId, status, error }: { clientMsgId: string; stat
         >
           {t("chat.retry")}
         </button>
-        <button className="inline-flex items-center gap-0.5 underline underline-offset-2" onClick={() => remove(clientMsgId)}>
+        <button
+          className="inline-flex items-center gap-0.5 underline underline-offset-2 ring-focus rounded-sm hover:text-red-100"
+          onClick={() => remove(clientMsgId)}
+        >
           <Trash2 className="size-3" /> {t("chat.discard")}
         </button>
       </span>

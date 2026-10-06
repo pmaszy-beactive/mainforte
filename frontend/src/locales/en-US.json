@@ -168,10 +168,12 @@
   "app": {
     "rail": {
       "collapse": "Collapse sidebar",
-      "expand": "Expand sidebar"
+      "expand": "Expand sidebar",
+      "workspace": "Workspace"
     },
     "widgets": {
       "title": "Widgets",
+      "titleCount": "Widgets ({{count}})",
       "empty": "No widgets yet",
       "emptyHint": "Results your staff produce show up here."
     },
@@ -179,10 +181,13 @@
       "title": "Your staff",
       "global": "Global channel",
       "invite": "Invite",
+      "invitePlaceholder": "teammate@company.com",
+      "inviteSubmit": "Send invite",
       "empty": "No staff yet",
       "emptyHint": "Invite a Concierge to get started."
     },
     "profile": {
+      "library": "Library",
       "billing": "Billing",
       "settings": "Settings",
       "logout": "Log out",
@@ -230,7 +235,9 @@
     "attach": "Attach a file",
     "removeAttachment": "Remove attachment",
     "dropHint": "Drop files to attach",
+    "attachmentLimit": "Up to {{max}} files per message",
     "uploading": "Uploading… {{pct}}%",
+    "uploadSlow": "Taking longer than usual",
     "uploadFailed": "Upload failed",
     "uploadRetry": "Retry upload",
     "tooLarge": "Too large (max 25 MB)",
@@ -247,6 +254,8 @@
     "language": "Language",
     "timezone": "Timezone",
     "workspaces": "Workspaces",
+    "editName": "Edit name",
+    "nameSaveFailed": "Couldn't save your name.",
     "connections": {
       "title": "Connections",
       "subtitle": "Let your staff act on your behalf through these accounts.",
@@ -284,7 +293,8 @@
       "onFile": "Card on file.",
       "save": "Save card",
       "saving": "Saving…",
-      "saved": "Card saved."
+      "saved": "Card saved.",
+      "unavailable": "Payments aren't available right now. Please contact support."
     },
     "subscribe": "Subscribe",
     "subscribing": "Subscribing…",
@@ -296,6 +306,27 @@
     "requiresAction": "Your payment needs additional verification.",
     "confirmAction": "Confirm payment",
     "placeholder": "Card, invoices and usage will appear here once billing is enabled."
+  },
+  "library": {
+    "title": "Library",
+    "subtitle": "Files you've shared and things your staff have produced.",
+    "tabs": {
+      "in": "In",
+      "out": "Out"
+    },
+    "delete": "Delete",
+    "deleteConfirm": "Delete?",
+    "in": {
+      "empty": "No files yet.",
+      "emptyHint": "Files you attach in chat show up here."
+    },
+    "out": {
+      "empty": "Nothing produced yet.",
+      "emptyHint": "Widgets and sites your staff build show up here.",
+      "widget": "Widget",
+      "site": "Site",
+      "alreadyDestroying": "Removing…"
+    }
   },
   "admin": {
     "badge": "Admin",
