@@ -91,7 +91,10 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
   };
 
   const uploading = localIds.some((id) => items[id]?.status === "uploading");
-  const canSend = !disabled && !uploading && (text.trim().length > 0 || localIds.length > 0);
+  // The Send button itself is swapped for Stop while streaming (below), but the textarea stays
+  // enabled and Enter still called submit() regardless -- canSend must also gate on `streaming`
+  // so pressing Enter during a reply can't queue a second message (ticket T02788).
+  const canSend = !disabled && !uploading && !streaming && (text.trim().length > 0 || localIds.length > 0);
 
   const submit = () => {
     if (!canSend) return;
