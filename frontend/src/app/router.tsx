@@ -3,6 +3,7 @@ import { lazy } from "react";
 import { RootLayout } from "@/components/layout/RootLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { AdminGuard } from "@/components/layout/AdminGuard";
+import { GuestGuard } from "@/components/layout/GuestGuard";
 
 const MarketingPage = lazy(() => import("@/features/marketing/MarketingPage"));
 const SignupPage = lazy(() => import("@/features/auth/SignupPage"));
@@ -38,8 +39,13 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       { path: "/", element: <MarketingPage /> },
-      { path: "/signup", element: <SignupPage /> },
-      { path: "/login", element: <LoginPage /> },
+      {
+        element: <GuestGuard />,
+        children: [
+          { path: "/signup", element: <SignupPage /> },
+          { path: "/login", element: <LoginPage /> },
+        ],
+      },
       { path: "/forgot-password", element: <ForgotPasswordPage /> },
       { path: "/reset-password", element: <ResetPasswordPage /> },
       { path: "/magic", element: <MagicPage /> },
