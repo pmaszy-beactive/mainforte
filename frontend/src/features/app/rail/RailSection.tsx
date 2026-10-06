@@ -19,6 +19,7 @@ export function RailItem({ icon, label, active, collapsed, onClick, meta }: { ic
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
+      aria-label={collapsed ? label : undefined}
       className={
         "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition ring-focus " +
         (active ? "bg-ember-500/10 text-ember-300 ring-1 ring-ember-500/20" : "text-fog-300 hover:bg-white/5 hover:text-fog-100") +

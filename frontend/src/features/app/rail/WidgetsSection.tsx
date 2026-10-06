@@ -16,10 +16,17 @@ export function WidgetsSection({ collapsed }: { collapsed: boolean }) {
   });
 
   if (collapsed) {
+    // A real, focusable control (not a decorative <div>) even when collapsed: opens the most
+    // recent widget directly, same as clicking it in the expanded list, instead of an icon that
+    // looked interactive but did nothing (ticket T02798).
+    const first = widgets[0];
     return (
-      <div className="grid place-items-center text-fog-700" title={t("app.widgets.title")}>
-        <LayoutGrid className="size-4" />
-      </div>
+      <RailItem
+        collapsed={collapsed}
+        icon={<LayoutGrid className="size-4" />}
+        label={widgets.length > 1 ? t("app.widgets.titleCount", { count: widgets.length }) : t("app.widgets.title")}
+        onClick={first ? () => window.open(first.url, "_blank", "noopener,noreferrer") : undefined}
+      />
     );
   }
   return (

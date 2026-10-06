@@ -173,6 +173,7 @@
     },
     "widgets": {
       "title": "Widgets",
+      "titleCount": "Widgets ({{count}})",
       "empty": "Aucun widget pour l'instant",
       "emptyHint": "Les résultats produits par votre personnel apparaîtront ici."
     },

@@ -173,6 +173,7 @@
     },
     "widgets": {
       "title": "Widgets",
+      "titleCount": "Widgets ({{count}})",
       "empty": "No widgets yet",
       "emptyHint": "Results your staff produce show up here."
     },
