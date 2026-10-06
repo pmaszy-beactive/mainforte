@@ -179,6 +179,8 @@
       "title": "Your staff",
       "global": "Global channel",
       "invite": "Invite",
+      "invitePlaceholder": "teammate@company.com",
+      "inviteSubmit": "Send invite",
       "empty": "No staff yet",
       "emptyHint": "Invite a Concierge to get started."
     },

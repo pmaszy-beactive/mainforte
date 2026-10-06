@@ -179,6 +179,8 @@
       "title": "Votre personnel",
       "global": "Canal global",
       "invite": "Inviter",
+      "invitePlaceholder": "collegue@entreprise.com",
+      "inviteSubmit": "Envoyer l'invitation",
       "empty": "Aucun personnel pour l'instant",
       "emptyHint": "Invitez un concierge pour commencer."
     },
