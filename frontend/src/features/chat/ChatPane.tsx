@@ -47,7 +47,11 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
         activity: [],
         local: { status: m.status, attempts: m.attempts, error: m.error },
       }));
-    return local.length ? [...stream.bubbles, ...local] : stream.bubbles;
+    if (!local.length) return stream.bubbles;
+    // Local bubbles (including failed ones, which never leave the outbox) must be inserted by
+    // send time, not appended after every confirmed message -- otherwise a failed message drops
+    // to the end of the list as soon as any later message is confirmed (T02802).
+    return [...stream.bubbles, ...local].sort((a, b) => a.ts.localeCompare(b.ts));
   }, [stream.bubbles, outbox, workspaceId, user]);
 
   const visible = useMemo(() => bubbles.filter((b) => (threadId === null ? true : b.threadId === threadId)), [bubbles, threadId]);
