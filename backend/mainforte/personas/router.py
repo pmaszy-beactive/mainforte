@@ -56,6 +56,15 @@ def _is_canceled(ws_id: str, thread_id: str | None, correlation_id: str | None) 
 SANDBOX_POLL_SECONDS = 0.5
 SANDBOX_MAX_WAIT_SECONDS = 90
 
+# The real streaming-LLM path checks _is_canceled on every chunk (several times a second,
+# naturally paced by the model's own output). The no-API-key echo fallback has no chunks to pace
+# against and used to check exactly once, immediately -- so a Stop click arriving with normal
+# human reaction time + one network round trip almost always landed after that single check
+# already passed, and the reply completed normally instead of canceling (ticket T02750). Poll a
+# few times instead of once so Stop has a comparable window here too.
+FALLBACK_CANCEL_POLL_SECONDS = 0.3
+FALLBACK_CANCEL_POLL_ROUNDS = 5
+
 
 async def _run_sandboxed_tool(*, tool_name: str, tool_input: dict[str, Any], ws_id: str,
                                correlation_id: str, thread_id: str | None, persona_id: str,
@@ -341,9 +350,12 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
             _emit_reply_debug(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id, persona=persona,
                                model=persona.model, system=system, messages=convo, tools=_ALL_TOOLS,
                                text=full, fallback=True)
-            if _is_canceled(ws_id, thread_id, correlation_id):
-                canceled = True
-            else:
+            for _ in range(FALLBACK_CANCEL_POLL_ROUNDS):
+                if _is_canceled(ws_id, thread_id, correlation_id):
+                    canceled = True
+                    break
+                await asyncio.sleep(FALLBACK_CANCEL_POLL_SECONDS)
+            if not canceled:
                 emit_ephemeral("persona.reply.delta", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
                               correlation_id=correlation_id, payload={"thread_id": thread_id, "text": full})
         else:

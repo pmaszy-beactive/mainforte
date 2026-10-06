@@ -131,6 +131,17 @@ function applyEvent(state: State, ev: WsEvent): State {
       bubbles[idx] = next;
       return { ...state, seen, activity, bubbles };
     }
+    case "persona.reply.cancel_requested": {
+      // Durable (chat/routes.py's cancel endpoint), correlation_id-bearing, but actor is the
+      // human who clicked Stop, not the persona replying -- its streamKey never matches the
+      // reply's own bubble, so routing it through the generic `default` case below created a
+      // second, orphaned "mine"-styled bubble (empty text, streaming forever, no event ever
+      // targets it again) that kept the Stop button stuck on even after the real reply bubble
+      // correctly resolved to canceled (ticket T02750). This is a side-channel signal the
+      // worker's own Redis-flag polling already acts on; the only bubble-relevant signal is the
+      // reply's own persona.reply.canceled event, which already works. Never touches a bubble.
+      return { ...state, seen, activity: pushActivity(state.activity, ev) };
+    }
     case "task.blocked": {
       const p = ev.payload as unknown as TaskBlockedPayload;
       const blockedTasks = { ...state.blockedTasks, [p.task_id]: { taskId: p.task_id, threadId: p.thread_id ?? null, reason: p.reason, ts: ev.ts } };
