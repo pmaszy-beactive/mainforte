@@ -41,6 +41,9 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const wsId = useUi((s) => s.workspaceId);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY missing/misconfigured left Save Card silently doing
+  // nothing -- button disappears, no form, no error (ticket T02749). Surface it instead.
+  const stripeUnavailable = !stripePromise;
 
   const billing = useQuery({
     queryKey: ["billing", wsId],
@@ -138,16 +141,20 @@ export default function BillingPage() {
         <div className="text-sm font-semibold">{t("billing.card.title")}</div>
         <p className="mt-1 text-xs text-fog-500">{hasCard ? t("billing.card.onFile") : t("billing.card.none")}</p>
 
-        {!clientSecret && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-3"
-            onClick={() => startCardSetup.mutate()}
-            loading={startCardSetup.isPending}
-          >
-            {t("billing.card.save")}
-          </Button>
+        {stripeUnavailable ? (
+          <Alert className="mt-3">{t("billing.card.unavailable")}</Alert>
+        ) : (
+          !clientSecret && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              onClick={() => startCardSetup.mutate()}
+              loading={startCardSetup.isPending}
+            >
+              {t("billing.card.save")}
+            </Button>
+          )
         )}
         {startCardSetup.isError && (
           <Alert className="mt-3">{errorMessage(startCardSetup.error, t("common.error"))}</Alert>

@@ -286,7 +286,8 @@
       "onFile": "Carte enregistrée.",
       "save": "Enregistrer la carte",
       "saving": "Enregistrement…",
-      "saved": "Carte enregistrée."
+      "saved": "Carte enregistrée.",
+      "unavailable": "Les paiements ne sont pas disponibles pour le moment. Veuillez contacter le soutien."
     },
     "subscribe": "S'abonner",
     "subscribing": "Abonnement en cours…",

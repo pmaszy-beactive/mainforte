@@ -286,7 +286,8 @@
       "onFile": "Card on file.",
       "save": "Save card",
       "saving": "Saving…",
-      "saved": "Card saved."
+      "saved": "Card saved.",
+      "unavailable": "Payments aren't available right now. Please contact support."
     },
     "subscribe": "Subscribe",
     "subscribing": "Subscribing…",
