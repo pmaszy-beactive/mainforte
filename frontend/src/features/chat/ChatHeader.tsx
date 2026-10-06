@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { StreamConnection } from "@/hooks/useEventStream";
 import { useUi } from "@/stores/ui";
 import { Button } from "@/components/ui/Button";
+import { newId } from "@/lib/ids";
 import { HistoryDropdown } from "./HistoryDropdown";
 import { ConnectionPill } from "./ConnectionPill";
 
@@ -24,7 +25,7 @@ export function ChatHeader({ connection }: { connection: StreamConnection }) {
           <PanelRight className="size-4" /> <span className="hidden sm:inline">{t("chat.viewPane")}</span>
         </Button>
         <HistoryDropdown />
-        <Button size="sm" onClick={() => setThread(null)}>
+        <Button size="sm" onClick={() => setThread(newId())}>
           <Plus className="size-4" /> {t("chat.newChat")}
         </Button>
       </div>
