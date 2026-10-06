@@ -15,10 +15,13 @@ export default function SignupPage() {
   const [params] = useSearchParams();
   const plan = params.get("plan");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [confirm, setConfirm] = useState("");
+  const mismatch = confirm.length > 0 && confirm !== form.password;
   const m = useLoginMutation(api.auth.register);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (mismatch) return;
     m.mutate(form);
   };
 
@@ -41,8 +44,18 @@ export default function SignupPage() {
         <Input label={t("auth.fields.name")} name="name" autoComplete="name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <Input label={t("auth.fields.email")} name="email" type="email" autoComplete="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         <Input label={t("auth.fields.password")} name="password" type="password" autoComplete="new-password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <Input
+          label={t("auth.fields.confirm")}
+          name="confirm"
+          type="password"
+          autoComplete="new-password"
+          required
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          hint={mismatch ? t("auth.reset.mismatch") : undefined}
+        />
         {m.isError && <Alert>{errorMessage(m.error, t("common.error"))}</Alert>}
-        <Button type="submit" className="w-full" loading={m.isPending}>
+        <Button type="submit" className="w-full" loading={m.isPending} disabled={mismatch}>
           {t("auth.signup.submit")}
         </Button>
       </form>
