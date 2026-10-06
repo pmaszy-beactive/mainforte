@@ -187,6 +187,7 @@
       "emptyHint": "Invite a Concierge to get started."
     },
     "profile": {
+      "library": "Library",
       "billing": "Billing",
       "settings": "Settings",
       "logout": "Log out",
@@ -305,6 +306,27 @@
     "requiresAction": "Your payment needs additional verification.",
     "confirmAction": "Confirm payment",
     "placeholder": "Card, invoices and usage will appear here once billing is enabled."
+  },
+  "library": {
+    "title": "Library",
+    "subtitle": "Files you've shared and things your staff have produced.",
+    "tabs": {
+      "in": "In",
+      "out": "Out"
+    },
+    "delete": "Delete",
+    "deleteConfirm": "Delete?",
+    "in": {
+      "empty": "No files yet.",
+      "emptyHint": "Files you attach in chat show up here."
+    },
+    "out": {
+      "empty": "Nothing produced yet.",
+      "emptyHint": "Widgets and sites your staff build show up here.",
+      "widget": "Widget",
+      "site": "Site",
+      "alreadyDestroying": "Removing…"
+    }
   },
   "admin": {
     "badge": "Admin",

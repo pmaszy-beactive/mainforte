@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { BookOpen, CreditCard, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -51,6 +51,9 @@ export function ProfileBlock({ collapsed }: { collapsed: boolean }) {
 
   const links = (
     <>
+      <Link to="/app/library" className={itemCls}>
+        <BookOpen className="size-3.5" /> {t("app.profile.library")}
+      </Link>
       <Link to="/app/billing" className={itemCls}>
         <CreditCard className="size-3.5" /> {t("app.profile.billing")}
       </Link>
@@ -74,39 +77,44 @@ export function ProfileBlock({ collapsed }: { collapsed: boolean }) {
     </span>
   );
 
+  // Billing/Settings/Logout/Library used to render permanently below the name in expanded mode --
+  // fixed rail space spent on every screen for links used rarely. Now both rail states open the
+  // same popover from the same trigger; only the trigger's own appearance (icon-only vs full
+  // name+email row) and the popover's anchor side differ.
   return (
     <div className="border-t border-white/5 p-2">
-      {collapsed ? (
-        <div ref={ref} className="relative">
-          <button
-            onClick={() => setOpen((o) => !o)}
-            aria-label={name}
-            aria-haspopup="true"
-            aria-expanded={open}
-            title={name}
-            className="mx-auto flex items-center justify-center rounded-full ring-focus"
-          >
-            {avatar}
-          </button>
-          {open && (
-            <div className="glass absolute bottom-full left-0 z-20 mb-1.5 w-48 rounded-xl p-1.5 animate-fade-up">
-              <div className="truncate px-2 pb-1.5 pt-0.5 text-xs font-medium text-fog-100">{name}</div>
-              <div className="grid gap-0.5">{links}</div>
-            </div>
+      <div ref={ref} className="relative">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label={name}
+          aria-haspopup="true"
+          aria-expanded={open}
+          title={name}
+          className={cn(
+            "ring-focus rounded-xl",
+            collapsed ? "mx-auto flex items-center justify-center rounded-full" : "flex w-full items-center gap-2.5 px-1.5 py-1.5 hover:bg-white/5",
           )}
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center gap-2.5 px-1.5 py-1.5">
-            {avatar}
-            <div className="min-w-0 flex-1">
+        >
+          {avatar}
+          {!collapsed && (
+            <div className="min-w-0 flex-1 text-left">
               <div className="truncate text-sm font-medium">{user?.name || "—"}</div>
               <div className="truncate text-[11px] text-fog-700">{user?.email}</div>
             </div>
+          )}
+        </button>
+        {open && (
+          <div
+            className={cn(
+              "glass absolute bottom-full z-20 mb-1.5 w-48 rounded-xl p-1.5 animate-fade-up",
+              collapsed ? "left-0" : "left-0 right-0 w-auto",
+            )}
+          >
+            <div className="truncate px-2 pb-1.5 pt-0.5 text-xs font-medium text-fog-100">{name}</div>
+            <div className="grid grid-cols-2 gap-0.5">{links}</div>
           </div>
-          <div className="mt-1 grid grid-cols-2 gap-0.5">{links}</div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

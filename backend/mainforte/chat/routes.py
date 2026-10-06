@@ -113,6 +113,33 @@ def get_upload(workspace_id: str, upload_id: str, ident: Identity = Depends(curr
                     headers={"Cache-Control": "private, max-age=3600", "Content-Disposition": f'inline; filename="{up.name}"'})
 
 
+@router.get("/uploads")
+def list_uploads(workspace_id: str, ident: Identity = Depends(current_identity), db: Session = Depends(get_db)):
+    ws = require_membership(workspace_id, ident, db)
+    rows = db.query(Upload).filter_by(ws_id=ws.id).order_by(Upload.created_at.desc()).all()
+    return [{**_upload_out(u), "created_at": u.created_at.isoformat()} for u in rows]
+
+
+@router.delete("/uploads/{upload_id}", status_code=204)
+def delete_upload(workspace_id: str, upload_id: str, ident: Identity = Depends(current_identity),
+                   db: Session = Depends(get_db)):
+    ws = require_membership(workspace_id, ident, db)
+    up = db.get(Upload, upload_id)
+    if not up or up.ws_id != ws.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    # Storage.delete() is idempotent (both LocalStorage/BackboneS3 no-op cleanly on a missing key),
+    # so it's safe to call even if a prior delete already removed the object.
+    get_storage().delete(up.key)
+    # No FK between MemoryChunk.source_id and Upload.id -- must drop this explicitly, or a deleted
+    # upload's text stays searchable/retrievable (chat/routes.py's attachment_context path, and
+    # personas/recall.py's search_memory) even though the file itself is gone.
+    db.query(MemoryChunk).filter_by(source_type="upload", source_id=upload_id).delete()
+    db.delete(up)
+    emit(db, "upload.deleted", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
+         payload={"upload_id": upload_id, "name": up.name})
+    return None
+
+
 @router.post("/chat", status_code=201)
 def post_message(workspace_id: str, body: MessageIn, ident: Identity = Depends(current_identity),
                  db: Session = Depends(get_db)):

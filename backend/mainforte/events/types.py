@@ -45,6 +45,7 @@ EVENT_TYPES: dict[str, str] = {
     "chat.thread.created": "Thread created",
     "chat.thread.rolled_up": "Thread rolled up into a summary",
     "chat.attachment.uploaded": "A file was attached",
+    "upload.deleted": "A file was removed from the library",
     # persona
     "persona.invited": "Persona added to workspace",
     "persona.renamed": "Persona renamed",
@@ -116,6 +117,7 @@ EVENT_TYPES: dict[str, str] = {
     "widget.published": "Widget published",
     "widget.viewed": "Widget viewed",
     "widget.disabled": "Widget disabled",
+    "widget.deleted": "Widget deleted",
     # site (chat-built, live-editable, publishable business web app — full Node.js app, not a
     # static widget bundle; see db/models.py's Site docstring). Build progress reuses the generic
     # build.* namespace above (build.started/log/succeeded/failed) rather than a parallel

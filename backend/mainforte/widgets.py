@@ -89,6 +89,27 @@ def list_widgets(workspace_id: str, ident: Identity = Depends(current_identity),
     return [_widget_out(w) for w in rows]
 
 
+@router.delete("/api/workspaces/{workspace_id}/widgets/{widget_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_widget(workspace_id: str, widget_id: str, ident: Identity = Depends(current_identity),
+                   db: Session = Depends(get_db)):
+    from mainforte.auth.deps import require_membership
+    from mainforte.db.models import Widget
+    from mainforte.events import emit
+
+    require_membership(workspace_id, ident, db)
+    widget = db.get(Widget, widget_id)
+    if not widget or widget.ws_id != workspace_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+
+    storage = get_storage()
+    storage.delete(widget_key(widget.owner_id, widget.slug, widget.version, "index.html"))
+    storage.delete(widget_key(widget.owner_id, widget.slug, widget.version, "data.json"))
+    db.delete(widget)
+    emit(db, "widget.deleted", ws_id=workspace_id, user_id=ident.user.id, actor=("user", ident.user.id),
+         payload={"widget_id": widget_id, "title": widget.title})
+    return None
+
+
 @router.get("/w/{token}/{path:path}")
 def serve_widget(token: str, path: str, db: Session = Depends(get_db)):
     from mainforte.db.models import Widget

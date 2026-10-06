@@ -18,10 +18,12 @@ import type {
   BillingSubscription,
   ChatPostResponse,
   Connection,
+  LibraryUpload,
   Me,
   MarketplaceListing,
   MarketplaceListingIn,
   MarketplaceOrder,
+  Site,
   Task,
   Widget,
   Workspace,
@@ -100,6 +102,7 @@ const get = <T>(path: string, query?: Query) => request<T>("GET", path, undefine
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {});
 const patch = <T>(path: string, body: unknown) => request<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => request<T>("PUT", path, body);
+const del = <T>(path: string) => request<T>("DELETE", path);
 
 /** True when a failed request should be retried (network, 5xx, 408, 429). */
 export function isRetryable(e: unknown): boolean {
@@ -182,6 +185,20 @@ export const api = {
   },
   widgets: {
     list: (wsId: string) => get<Widget[]>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets`),
+    remove: (wsId: string, widgetId: string) =>
+      del<void>(`/api/workspaces/${encodeURIComponent(wsId)}/widgets/${encodeURIComponent(widgetId)}`),
+  },
+  sites: {
+    list: (wsId: string) => get<Site[]>(`/api/workspaces/${encodeURIComponent(wsId)}/sites`),
+    destroy: (wsId: string, siteId: string) =>
+      post<{ ok: boolean; site_id: string }>(`/api/workspaces/${encodeURIComponent(wsId)}/sites/${encodeURIComponent(siteId)}/destroy`),
+  },
+  library: {
+    uploads: {
+      list: (wsId: string) => get<LibraryUpload[]>(`/api/workspaces/${encodeURIComponent(wsId)}/uploads`),
+      remove: (wsId: string, uploadId: string) =>
+        del<void>(`/api/workspaces/${encodeURIComponent(wsId)}/uploads/${encodeURIComponent(uploadId)}`),
+    },
   },
   billing: {
     get: (wsId: string) => get<BillingState>(`/api/workspaces/${encodeURIComponent(wsId)}/billing`),

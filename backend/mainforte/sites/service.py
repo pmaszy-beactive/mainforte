@@ -107,6 +107,7 @@ def plain_status(site: Site) -> dict[str, Any]:
         "stage": site.stage,
         "can_publish": site.status == "ready",
         "has_error": site.status == "error",
+        "is_destroying": site.status == "destroying",
     }
 
 

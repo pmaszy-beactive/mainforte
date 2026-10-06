@@ -16,6 +16,7 @@ const AppLayout = lazy(() => import("@/features/app/AppLayout"));
 const ChatPage = lazy(() => import("@/features/chat/ChatPage"));
 const SettingsPage = lazy(() => import("@/features/settings/SettingsPage"));
 const BillingPage = lazy(() => import("@/features/billing/BillingPage"));
+const LibraryPage = lazy(() => import("@/features/library/LibraryPage"));
 const MarketplaceBrowsePage = lazy(() => import("@/features/marketplace/MarketplaceBrowsePage"));
 const MarketplaceListingPage = lazy(() => import("@/features/marketplace/MarketplaceListingPage"));
 const MarketplaceNewListingPage = lazy(() => import("@/features/marketplace/MarketplaceNewListingPage"));
@@ -60,6 +61,7 @@ export const router = createBrowserRouter([
               { index: true, element: <ChatPage /> },
               { path: "settings", element: <SettingsPage /> },
               { path: "billing", element: <BillingPage /> },
+              { path: "library", element: <LibraryPage /> },
               { path: "marketplace", element: <MarketplaceBrowsePage /> },
               { path: "marketplace/new", element: <MarketplaceNewListingPage /> },
               { path: "marketplace/mine", element: <MyListingsPage /> },

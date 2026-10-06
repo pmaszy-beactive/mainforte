@@ -187,6 +187,7 @@
       "emptyHint": "Invitez un concierge pour commencer."
     },
     "profile": {
+      "library": "Bibliothèque",
       "billing": "Facturation",
       "settings": "Réglages",
       "logout": "Se déconnecter",
@@ -305,6 +306,27 @@
     "requiresAction": "Votre paiement nécessite une vérification supplémentaire.",
     "confirmAction": "Confirmer le paiement",
     "placeholder": "La carte, les factures et l'utilisation apparaîtront ici une fois la facturation activée."
+  },
+  "library": {
+    "title": "Bibliothèque",
+    "subtitle": "Fichiers partagés et éléments produits par votre personnel.",
+    "tabs": {
+      "in": "Reçus",
+      "out": "Produits"
+    },
+    "delete": "Supprimer",
+    "deleteConfirm": "Supprimer?",
+    "in": {
+      "empty": "Aucun fichier pour l'instant.",
+      "emptyHint": "Les fichiers que vous joignez dans le clavardage apparaîtront ici."
+    },
+    "out": {
+      "empty": "Rien n'a encore été produit.",
+      "emptyHint": "Les widgets et sites créés par votre personnel apparaîtront ici.",
+      "widget": "Widget",
+      "site": "Site",
+      "alreadyDestroying": "Suppression en cours…"
+    }
   },
   "admin": {
     "badge": "Admin",
