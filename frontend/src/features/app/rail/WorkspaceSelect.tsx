@@ -2,6 +2,7 @@ import { Building } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useMe } from "@/hooks/useMe";
 import { useUi } from "@/stores/ui";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 /** Only rendered when the user belongs to more than one workspace -- with just one, there's
  * nothing to switch between, so omit the control entirely rather than show it disabled. */
@@ -14,21 +15,21 @@ export function WorkspaceSelect({ collapsed }: { collapsed: boolean }) {
 
   if (workspaces.length < 2) return null;
 
+  const names = Object.fromEntries(workspaces.map((w) => [w.id, w.name]));
+  const ids = workspaces.map((w) => w.id);
+  const current = workspaceId ?? ids[0];
+
   return (
-    <div className={collapsed ? "" : "relative"} title={t("app.rail.workspace")}>
+    <div className="relative" title={t("app.rail.workspace")}>
       <Building className="pointer-events-none absolute left-1.5 top-1/2 size-3.5 -translate-y-1/2 text-fog-500" />
-      <select
-        aria-label={t("app.rail.workspace")}
-        value={workspaceId ?? ""}
-        onChange={(e) => switchWorkspace(e.target.value)}
-        className="appearance-none rounded-lg bg-transparent py-1.5 pl-7 pr-1.5 text-xs text-fog-300 hover:bg-white/5 hover:text-fog-100 ring-focus"
-      >
-        {workspaces.map((w) => (
-          <option key={w.id} value={w.id} className="bg-ink-950 text-fog-100">
-            {collapsed ? w.name.slice(0, 2).toUpperCase() : w.name}
-          </option>
-        ))}
-      </select>
+      <Dropdown
+        label={t("app.rail.workspace")}
+        value={current}
+        options={ids}
+        onChange={switchWorkspace}
+        trigger={collapsed ? names[current]?.slice(0, 2).toUpperCase() : names[current]}
+        renderOption={(id) => (collapsed ? names[id]?.slice(0, 2).toUpperCase() : names[id])}
+      />
     </div>
   );
 }
