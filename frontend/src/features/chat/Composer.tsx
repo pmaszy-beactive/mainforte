@@ -79,7 +79,8 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
     if (ids.length) setLocalIds((l) => [...l, ...ids]);
   };
 
-  const canSend = !disabled && (text.trim().length > 0 || localIds.length > 0);
+  const uploading = localIds.some((id) => items[id]?.status === "uploading");
+  const canSend = !disabled && !uploading && (text.trim().length > 0 || localIds.length > 0);
 
   const submit = () => {
     if (!canSend) return;
