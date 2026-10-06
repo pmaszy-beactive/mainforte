@@ -252,6 +252,8 @@
     "language": "Language",
     "timezone": "Timezone",
     "workspaces": "Workspaces",
+    "editName": "Edit name",
+    "nameSaveFailed": "Couldn't save your name.",
     "connections": {
       "title": "Connections",
       "subtitle": "Let your staff act on your behalf through these accounts.",

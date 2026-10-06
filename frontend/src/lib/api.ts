@@ -134,7 +134,7 @@ export const api = {
     register: (b: { platform: string; token: string }) => post<void>("/api/push/register", b),
   },
   me: Object.assign(() => get<Me>("/api/me"), {
-    update: (b: { locale?: string; timezone?: string }) => patch<Me>("/api/me", b),
+    update: (b: { name?: string; locale?: string; timezone?: string }) => patch<Me>("/api/me", b),
   }),
   workspaces: {
     list: () => get<Workspace[]>("/api/workspaces"),

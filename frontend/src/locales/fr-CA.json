@@ -252,6 +252,8 @@
     "language": "Langue",
     "timezone": "Fuseau horaire",
     "workspaces": "Espaces de travail",
+    "editName": "Modifier le nom",
+    "nameSaveFailed": "Impossible d'enregistrer votre nom.",
     "connections": {
       "title": "Connexions",
       "subtitle": "Laissez votre personnel agir en votre nom via ces comptes.",
