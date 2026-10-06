@@ -17,15 +17,17 @@ from sqlalchemy.orm import Session
 from mainforte.aiproxy import client as aiproxy
 from mainforte.aiproxy.keys import get_or_mint
 from mainforte.aiproxy.pricing import estimate_cost_usd
-from mainforte.db.models import Persona, User, Workspace
+from mainforte.chat.attachments import image_block
+from mainforte.db.models import Persona, Upload, User, Workspace
 from mainforte.db.session import db_session
 from mainforte.events import emit, emit_ephemeral
 from mainforte.events.governor import _extract_claims, ground_action_claims
 from mainforte.events.stream import sync_redis
 from mainforte.ids import new_id
 from mainforte.personas import catalog
-from mainforte.personas.memory import build_system_prompt, recent_thread_messages
+from mainforte.personas.memory import attachment_context, build_system_prompt, recent_thread_messages
 from mainforte.personas.service import list_active
+from mainforte.storage import get_storage
 from mainforte.tasks.work import run_tool
 from mainforte.tools.catalog import TOOLS, to_anthropic_schema
 
@@ -39,6 +41,37 @@ MENTION_RE = re.compile(r"@(\w+)")
 # sandboxed ones (bash, browser_*) dispatch to the `work` queue via _run_sandboxed_tool — never
 # run in-process in this chat-queue task.
 _ALL_TOOLS = to_anthropic_schema(TOOLS)
+
+
+def _build_current_turn(db: Session, *, ws_id: str, thread_id: str | None, user_text: str,
+                         attachments: list[dict[str, Any]]) -> dict[str, Any]:
+    """The user's current turn, with attachments actually reaching the model: relevant excerpts
+    from any document text (via FTS retrieval, not whole-document stuffing -- see
+    personas.memory.attachment_context) appended to the text, and each image attachment resolved
+    to a real vision content block. Historical attachments are intentionally left out of
+    recent_thread_messages -- only the triggering message's own images get sent as vision blocks,
+    so a long thread doesn't re-send every past image on every turn."""
+    text = user_text.strip() or "(attachment only)"
+    text += attachment_context(db, ws_id=ws_id, thread_id=thread_id, query=user_text)
+
+    images: list[dict[str, Any]] = []
+    for att in attachments:
+        content_type = att.get("content_type") or ""
+        if not content_type.startswith("image/"):
+            continue
+        up = db.get(Upload, att.get("id"))
+        if not up or up.ws_id != ws_id:
+            continue
+        data = get_storage().get(up.key)
+        if data is None:
+            continue
+        block = image_block(content_type=content_type, data=data)
+        if block:
+            images.append(block)
+
+    if not images:
+        return {"role": "user", "content": text}
+    return {"role": "user", "content": [{"type": "text", "text": text}, *images]}
 
 
 def _cancel_key(ws_id: str, target: str) -> str:
@@ -565,7 +598,8 @@ def route_message(event: dict[str, Any]) -> None:
         targets = _pick_personas(user_text, roster)
         api_key = get_or_mint(db, ws)
         user = db.get(User, user_id) if user_id else None
-        current = {"role": "user", "content": user_text.strip() or "(attachment only)"}
+        current = _build_current_turn(db, ws_id=ws_id, thread_id=thread_id, user_text=user_text,
+                                       attachments=payload.get("attachments") or [])
         history = [*recent_thread_messages(db, thread_id=thread_id), current]
 
     async def _run_all() -> None:

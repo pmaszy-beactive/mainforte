@@ -39,8 +39,10 @@ export function AttachmentTray({ localIds, onRemove }: { localIds: string[]; onR
         const slow = a.status === "uploading" && !!a.uploadStartedAt && Date.now() - a.uploadStartedAt > SLOW_UPLOAD_MS;
         return (
           <li key={a.localId} className={cn("relative flex items-center gap-2 rounded-xl border bg-ink-950/60 p-1.5 pr-8 text-xs", failed ? "border-red-500/40" : "border-white/10")}>
-            {a.objectUrl ? (
+            {a.objectUrl && a.content_type.startsWith("image/") ? (
               <img src={a.objectUrl} alt={a.name} className="size-10 rounded-lg object-cover" />
+            ) : a.objectUrl && a.content_type.startsWith("video/") ? (
+              <video src={a.objectUrl} muted preload="metadata" className="size-10 rounded-lg object-cover" />
             ) : (
               <span className="grid size-10 place-items-center rounded-lg bg-white/5 text-fog-500">
                 <FileText className="size-4" />

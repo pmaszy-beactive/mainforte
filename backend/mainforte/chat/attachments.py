@@ -7,13 +7,21 @@ formats — docx (`python-docx`), xlsx (`openpyxl`), pptx (`python-pptx`). Legac
 formats (`application/msword`, `application/vnd.ms-excel`, `application/vnd.ms-powerpoint`) are
 accepted for upload (see `ALLOWED_PREFIXES`) but not extracted — their real content is a
 proprietary binary layout with no lightweight pure-Python reader; add one only if a real need for
-old `.doc`/`.xls`/`.ppt` shows up, rather than pulling in a fragile dependency speculatively."""
+old `.doc`/`.xls`/`.ppt` shows up, rather than pulling in a fragile dependency speculatively.
+
+Also builds Anthropic vision content blocks for image attachments -- images never reached the
+model before this, same gap as document text."""
 from __future__ import annotations
 
+import base64
 import io
 import logging
 
 log = logging.getLogger(__name__)
+
+# Anthropic rejects an image source much past this; skip rather than send a request we know will
+# be rejected (the model still sees the attachment reference via the message's text/name).
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 TEXT_PREFIXES = ("text/", "application/json")
 
@@ -94,3 +102,14 @@ def extract_text(*, content_type: str, data: bytes) -> str | None:
     except Exception:
         log.warning("attachment text extraction failed content_type=%s", content_type, exc_info=True)
         return None
+
+
+def image_block(*, content_type: str, data: bytes) -> dict | None:
+    """An Anthropic image content block for one attachment's bytes, or None if it's not an image
+    or is too large to send (MAX_IMAGE_BYTES on the raw bytes -- base64 inflates further)."""
+    if not content_type.startswith("image/") or len(data) > MAX_IMAGE_BYTES:
+        return None
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": content_type, "data": base64.b64encode(data).decode("ascii")},
+    }

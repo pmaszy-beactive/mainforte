@@ -20,7 +20,7 @@ interface Props {
   onSend: (text: string, attachmentLocalIds: string[]) => void;
 }
 
-const ACCEPT = "image/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
+const ACCEPT = "image/*,video/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
 const DRAFT_SAVE_DEBOUNCE_MS = 1500;
 
 export function Composer({ workspaceId, threadId, draftKey, streaming, stopping, onStop, onSend }: Props) {

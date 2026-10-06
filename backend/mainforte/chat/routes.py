@@ -26,7 +26,7 @@ from mainforte.storage import get_storage, upload_key
 router = APIRouter(prefix="/api/workspaces/{workspace_id}", tags=["chat"])
 
 MAX_UPLOAD = 25 * 1024 * 1024
-ALLOWED_PREFIXES = ("image/", "text/", "application/pdf", "application/json", "text/csv",
+ALLOWED_PREFIXES = ("image/", "video/", "text/", "application/pdf", "application/json", "text/csv",
                     "application/vnd.openxmlformats-officedocument", "application/zip",
                     "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint")
 
@@ -138,6 +138,16 @@ def post_message(workspace_id: str, body: MessageIn, ident: Identity = Depends(c
         thread_id = new_id()
         emit(db, "chat.thread.created", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
              payload={"thread_id": thread_id, "kind": "global"})
+
+    # The upload's thread isn't known until the message referencing it is posted (uploads happen
+    # before send); backfill it on the chunk so attachment retrieval can be scoped to this thread
+    # instead of matching text from every file ever shared in the workspace.
+    if body.attachments:
+        (
+            db.query(MemoryChunk)
+            .filter(MemoryChunk.source_type == "upload", MemoryChunk.source_id.in_([a.id for a in body.attachments]))
+            .update({"thread_id": thread_id}, synchronize_session=False)
+        )
     ev = emit(db, "chat.message.created", ws_id=ws.id, user_id=ident.user.id, actor=("user", ident.user.id),
               correlation_id=thread_id,
               payload={"thread_id": thread_id, "text": body.text, "attachments": atts, "client_msg_id": body.client_msg_id})

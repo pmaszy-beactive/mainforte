@@ -6,7 +6,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from mainforte.db.models import Event, Memory, Persona, Preference, User
-from mainforte.personas.recall import format_relevant_history, search_memory
+from mainforte.personas.recall import format_relevant_history, search_attachment_chunks, search_memory
 
 MEMORY_LIMIT = 20
 HISTORY_LIMIT = 20
@@ -75,6 +75,19 @@ def build_system_prompt(
             out = f"{out}\n\n## This member's preferences\n" + "\n".join(f"- {l}" for l in lines)
 
     return out
+
+
+def attachment_context(db: Session, *, ws_id: str, thread_id: str | None, query: str) -> str:
+    """Relevant excerpts from files shared in this thread, matched against the current message --
+    appended to the user turn's content, not the system prompt (it's about *this* message, not
+    standing workspace knowledge). Empty string when nothing matches or no query was given."""
+    if not thread_id:
+        return ""
+    hits = search_attachment_chunks(db, ws_id=ws_id, thread_id=thread_id, query=query)
+    if not hits:
+        return ""
+    parts = [h["text"] for h in hits]
+    return "\n\n[Attached file content, most relevant excerpts]\n" + "\n---\n".join(parts)
 
 
 def recent_thread_messages(db: Session, *, thread_id: str | None, limit: int = HISTORY_LIMIT) -> list[dict[str, str]]:

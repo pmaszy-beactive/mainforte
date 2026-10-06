@@ -80,7 +80,7 @@ export const useAttachments = create<AttachmentsState>()((set, get) => {
     items: {},
     add: (workspaceId, file) => {
       const localId = newId();
-      const objectUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+      const objectUrl = file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : null;
       const item: PendingAttachment = {
         localId,
         workspaceId,
