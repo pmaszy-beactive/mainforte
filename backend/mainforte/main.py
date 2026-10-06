@@ -66,7 +66,7 @@ async def lifespan(_app: FastAPI):
         await close_all_connections()
 
 
-app = FastAPI(title="Mainforte", version="0.1.60", docs_url="/api/docs", openapi_url="/api/openapi.json",
+app = FastAPI(title="Mainforte", version="0.1.61", docs_url="/api/docs", openapi_url="/api/openapi.json",
               lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, settings.app_url, "capacitor://localhost", "http://localhost"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
