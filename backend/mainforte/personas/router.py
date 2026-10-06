@@ -309,10 +309,13 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                      user: User | None = None) -> None:
     arche = catalog.get(persona.slug)
     base = arche.system_prompt if arche else "You are a helpful assistant."
-    started = emit_ephemeral(
-        "persona.reply.started", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
-        correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id},
-    )
+    # Durable (not emit_ephemeral) so a client that remounts mid-reply -- navigating away and back,
+    # or a hard reload -- can still see "a reply is in flight" from REST history replay, instead of
+    # the in-progress state vanishing until `ended` lands (ticket T02775). One row per reply, not
+    # per-delta, so this doesn't reintroduce the write-volume concern emit_ephemeral exists for.
+    with db_session() as db:
+        started = emit(db, "persona.reply.started", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
+                       correlation_id=correlation_id, payload={"thread_id": thread_id, "persona_id": persona.id})
     log.info("persona.reply.started %s persona=%s thread=%s", started["id"], persona.slug, thread_id)
 
     full = ""

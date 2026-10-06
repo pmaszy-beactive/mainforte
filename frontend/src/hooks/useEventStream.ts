@@ -80,24 +80,31 @@ function applyEvent(state: State, ev: WsEvent): State {
       };
       return { ...state, seen, bubbles: [...state.bubbles, b] };
     }
+    case "persona.reply.started":
     case "persona.reply.delta":
     case "persona.reply.ended":
     case "persona.reply.canceled": {
       const p = ev.payload as unknown as ReplyPayload;
       const key = streamKey(ev);
+      const started = ev.type === "persona.reply.started";
       const ended = ev.type === "persona.reply.ended";
       const canceled = ev.type === "persona.reply.canceled";
       const idx = state.bubbles.findIndex((b) => b.id === key || (ended && b.id === ev.id));
       const activity = canceled ? pushActivity(state.activity, ev) : state.activity;
       if (idx === -1) {
         if (canceled) return { ...state, seen, activity };
+        // `started` is now durable (ticket T02775) specifically so this branch can fire on REST
+        // replay after a remount, not just on live delivery -- a reply still in flight when the
+        // user navigates away and back (or hard-reloads) shows "Thinking…" again instead of
+        // silently vanishing, and reconciles normally once its (already-durable) ended/canceled
+        // event replays right after it.
         const b: Bubble = {
           id: key,
           threadId: p.thread_id ?? null,
           actorType: ev.actor.type,
           actorId: ev.actor.id,
           userId: ev.user_id,
-          text: p.text ?? "",
+          text: started ? "" : (p.text ?? ""),
           ts: ev.ts,
           streaming: !ended,
           canceled: false,
@@ -108,6 +115,7 @@ function applyEvent(state: State, ev: WsEvent): State {
         };
         return { ...state, seen, activity, bubbles: [...state.bubbles, b] };
       }
+      if (started) return { ...state, seen }; // bubble already exists (e.g. a delta arrived first)
       const cur = state.bubbles[idx];
       let next: Bubble;
       if (ended) {
@@ -222,9 +230,18 @@ export function useEventStream(workspaceId: string | null | undefined) {
     };
 
     (async () => {
+      // Always hydrate with the backend's "latest N events" branch (no `after`), never the
+      // persisted per-workspace cursor from useStream -- that cursor only exists to tell the
+      // socket where to resume live streaming. Using it here too meant every remount after the
+      // first (route change, hard reload) replayed nothing older than "the last event this
+      // browser ever saw", while the bubbles reconstructed from that history lived only in this
+      // hook's now-destroyed reducer state -- the whole conversation, and any reply mid-flight,
+      // would vanish on return (ticket T02775). `after`, used below for the socket only, still
+      // falls back to the persisted cursor so a workspace with zero fetched history (e.g.
+      // genuinely offline) can still resume live streaming from where it last left off.
       let after = useStream.getState().lastIds[workspaceId] ?? null;
       try {
-        const { events } = await api.workspaces.events(workspaceId, { after: after ?? undefined, limit: 200 });
+        const { events } = await api.workspaces.events(workspaceId, { limit: 200 });
         if (cancelled) return;
         if (events.length) {
           dispatch({ type: "hydrate", events });
