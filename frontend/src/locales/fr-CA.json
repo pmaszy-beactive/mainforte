@@ -230,6 +230,7 @@
     "attach": "Joindre un fichier",
     "removeAttachment": "Retirer la pièce jointe",
     "dropHint": "Déposez des fichiers pour les joindre",
+    "attachmentLimit": "Maximum {{max}} fichiers par message",
     "uploading": "Téléversement… {{pct}} %",
     "uploadSlow": "Ça prend plus de temps que prévu",
     "uploadFailed": "Échec du téléversement",

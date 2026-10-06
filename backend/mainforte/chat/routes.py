@@ -42,7 +42,9 @@ class MessageIn(BaseModel):
     client_msg_id: str = Field(min_length=8, max_length=64)
     thread_id: str | None = None
     text: str = Field(default="", max_length=20_000)
-    attachments: list[AttachmentRef] = []
+    # T02790: the composer caps attachments per message client-side; this mirrors that limit
+    # server-side so a direct/malformed POST can't bypass it.
+    attachments: list[AttachmentRef] = Field(default=[], max_length=10)
 
 
 class FeedbackIn(BaseModel):

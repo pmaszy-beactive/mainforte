@@ -4,6 +4,11 @@ import type { UploadResult } from "./types";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+// Ticket T02790: attaching a large batch of files at once had no limit and could grow the
+// composer's attachment tray tall enough to push the message type, textarea, and Send button out
+// of view. Capped independently of the tray's own max-height/scroll fix (AttachmentTray.tsx).
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+
 // Generous for the 25MB ceiling even on a slow link; matches the backend's own 120s S3 PUT
 // timeout plus headroom for extraction. Without this, a dropped connection that never fires a
 // clean error/abort event leaves the upload promise (and the composer) stuck at 100% forever.

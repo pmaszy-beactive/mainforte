@@ -230,6 +230,7 @@
     "attach": "Attach a file",
     "removeAttachment": "Remove attachment",
     "dropHint": "Drop files to attach",
+    "attachmentLimit": "Up to {{max}} files per message",
     "uploading": "Uploading… {{pct}}%",
     "uploadSlow": "Taking longer than usual",
     "uploadFailed": "Upload failed",

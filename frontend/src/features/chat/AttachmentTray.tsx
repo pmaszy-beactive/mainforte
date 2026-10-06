@@ -32,7 +32,7 @@ export function AttachmentTray({ localIds, onRemove }: { localIds: string[]; onR
   if (list.length === 0) return null;
 
   return (
-    <ul className="mb-2 flex flex-wrap gap-2 px-1">
+    <ul className="mb-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto px-1">
       {list.map((a) => {
         const failed = a.status === "failed";
         const tooLarge = a.error === "tooLarge";
