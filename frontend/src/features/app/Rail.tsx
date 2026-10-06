@@ -8,6 +8,7 @@ import { WidgetsSection } from "./rail/WidgetsSection";
 import { StaffSection } from "./rail/StaffSection";
 import { ProfileBlock } from "./rail/ProfileBlock";
 import { LanguageSelect } from "./rail/LanguageSelect";
+import { WorkspaceSelect } from "./rail/WorkspaceSelect";
 
 export function Rail() {
   const { t } = useTranslation();
@@ -27,6 +28,7 @@ export function Rail() {
         </Link>
         {!collapsed && (
           <div className="flex items-center gap-1">
+            <WorkspaceSelect collapsed={collapsed} />
             <LanguageSelect collapsed={collapsed} />
             <button onClick={toggle} className="rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.collapse")}>
               <PanelLeftClose className="size-4" />
@@ -39,6 +41,7 @@ export function Rail() {
           <button onClick={toggle} className="rounded-lg p-1.5 text-fog-500 hover:bg-white/5 hover:text-fog-100 ring-focus" aria-label={t("app.rail.expand")}>
             <PanelLeftOpen className="size-4" />
           </button>
+          <WorkspaceSelect collapsed={collapsed} />
           <LanguageSelect collapsed={collapsed} />
         </div>
       )}

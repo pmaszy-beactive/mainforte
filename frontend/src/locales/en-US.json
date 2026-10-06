@@ -168,7 +168,8 @@
   "app": {
     "rail": {
       "collapse": "Collapse sidebar",
-      "expand": "Expand sidebar"
+      "expand": "Expand sidebar",
+      "workspace": "Workspace"
     },
     "widgets": {
       "title": "Widgets",

@@ -168,7 +168,8 @@
   "app": {
     "rail": {
       "collapse": "Réduire la barre latérale",
-      "expand": "Agrandir la barre latérale"
+      "expand": "Agrandir la barre latérale",
+      "workspace": "Espace de travail"
     },
     "widgets": {
       "title": "Widgets",

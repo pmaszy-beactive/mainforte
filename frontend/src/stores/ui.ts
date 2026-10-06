@@ -13,6 +13,10 @@ interface UiState {
   toggleViewPane: () => void;
   setThread: (id: string | null) => void;
   setWorkspace: (id: string | null) => void;
+  /** User-initiated workspace switch (the rail's WorkspaceSelect): unlike setWorkspace (also used
+   * by AppLayout's auto-pick-a-default effect), this also clears activeThreadId, since a thread
+   * id from the previous workspace is meaningless in the new one. */
+  switchWorkspace: (id: string) => void;
 }
 
 export const useUi = create<UiState>()(
@@ -35,6 +39,7 @@ export const useUi = create<UiState>()(
       toggleViewPane: () => set((s) => ({ viewPaneOpen: !s.viewPaneOpen })),
       setThread: (activeThreadId) => set({ activeThreadId }),
       setWorkspace: (workspaceId) => set({ workspaceId }),
+      switchWorkspace: (workspaceId) => set({ workspaceId, activeThreadId: null }),
     }),
     { name: "mainforte.ui", partialize: (s) => ({ railCollapsed: s.railCollapsed, workspaceId: s.workspaceId, drafts: s.drafts }) },
   ),
