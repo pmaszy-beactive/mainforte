@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from mainforte.auth.deps import Identity, current_identity, require_membership
 from mainforte.chat.attachments import extract_text
@@ -78,8 +79,12 @@ async def upload(workspace_id: str, file: UploadFile = File(...), ident: Identit
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"unsupported type {ctype}")
     uid = new_id()
     key = upload_key(ident.user.id, uid, file.filename or "file")
-    stored = get_storage().put(key, data, ctype)
-    extracted = extract_text(content_type=ctype, data=data)
+    # get_storage().put() is a blocking network call (BackboneS3's sync httpx client); run it off
+    # the event loop so one large upload's S3 PUT doesn't stall every other concurrent request
+    # this worker process is handling (ticket T02791 -- "stuck at 100%" is consistent with a
+    # second request queued behind a blocked event loop, not just this upload's own latency).
+    stored = await run_in_threadpool(get_storage().put, key, data, ctype)
+    extracted = await run_in_threadpool(extract_text, content_type=ctype, data=data)
     now = utcnow()
     up = Upload(id=uid, ws_id=ws.id, user_id=ident.user.id, key=key, name=file.filename or "file",
                 content_type=ctype, size=stored.size, sha256=stored.sha256, extracted_text=extracted,

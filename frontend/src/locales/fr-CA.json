@@ -231,6 +231,7 @@
     "removeAttachment": "Retirer la pièce jointe",
     "dropHint": "Déposez des fichiers pour les joindre",
     "uploading": "Téléversement… {{pct}} %",
+    "uploadSlow": "Ça prend plus de temps que prévu",
     "uploadFailed": "Échec du téléversement",
     "uploadRetry": "Réessayer le téléversement",
     "tooLarge": "Trop volumineux (max 25 Mo)",

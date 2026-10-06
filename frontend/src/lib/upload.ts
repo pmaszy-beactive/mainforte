@@ -4,6 +4,11 @@ import type { UploadResult } from "./types";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+// Generous for the 25MB ceiling even on a slow link; matches the backend's own 120s S3 PUT
+// timeout plus headroom for extraction. Without this, a dropped connection that never fires a
+// clean error/abort event leaves the upload promise (and the composer) stuck at 100% forever.
+const UPLOAD_TIMEOUT_MS = 180_000;
+
 /** One multipart upload via XHR so we get progress events. */
 export function uploadXhr(
   workspaceId: string,
@@ -15,12 +20,14 @@ export function uploadXhr(
     const xhr = new XMLHttpRequest();
     onXhr(xhr);
     xhr.open("POST", api.workspaces.uploadUrl(workspaceId));
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.setRequestHeader("Accept", "application/json");
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
+    xhr.ontimeout = () => reject(new ApiError(0, "Upload timed out"));
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {

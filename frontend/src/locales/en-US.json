@@ -231,6 +231,7 @@
     "removeAttachment": "Remove attachment",
     "dropHint": "Drop files to attach",
     "uploading": "Uploading… {{pct}}%",
+    "uploadSlow": "Taking longer than usual",
     "uploadFailed": "Upload failed",
     "uploadRetry": "Retry upload",
     "tooLarge": "Too large (max 25 MB)",
