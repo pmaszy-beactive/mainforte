@@ -1,16 +1,20 @@
 """Decides which persona(s) reply to a chat message, and drives the streamed reply.
 
 Runs as a Celery task on the `chat` queue (no filesystem, no sandbox — just an LLM round trip).
-Cancellation: `chat/routes.py:cancel` sets `cancel:{ws}:{target}` in Redis; we poll it between
-chunks and between personas so a cancel takes effect within one network read, not after the
-whole reply finishes.
+Cancellation: `chat/routes.py:cancel` sets `cancel:{ws}:{target}` in Redis. Checked: between
+personas; while streaming an LLM reply, via `_cancelable_chunks` (polls even while waiting on the
+network, not just between chunks that have already arrived -- a plain `async for chunk in
+aiproxy.stream_reply(...)` only re-enters its loop body, where the check lived, once a chunk
+actually arrives, so a stalled/slow upstream response was completely uninterruptible for up to its
+120s read timeout); and while waiting on a sandboxed tool dispatched to the `work` queue, via
+`_run_sandboxed_tool`'s own poll loop.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
-from typing import Any
+from typing import Any, AsyncIterator
 
 from sqlalchemy.orm import Session
 
@@ -84,6 +88,57 @@ def _is_canceled(ws_id: str, thread_id: str | None, correlation_id: str | None) 
         if r.exists(_cancel_key(ws_id, target)):
             return True
     return False
+
+
+STREAM_CANCEL_POLL_SECONDS = 1.0
+
+
+async def _cancelable_chunks(
+    stream: AsyncIterator[str], *, ws_id: str, thread_id: str | None, correlation_id: str,
+) -> AsyncIterator[str | None]:
+    """Wraps an aiproxy.stream_reply() iterator so cancellation is checked even while waiting on
+    the network, not only between chunks. The module docstring's "we poll between chunks" claim
+    was false whenever the read itself stalled: `stream_reply`'s httpx call has a 120s read
+    timeout, and if the upstream proxy accepts the connection but then sends nothing for a while
+    (slow first token, a stuck request, a network hiccup to the proxy), `async for chunk in
+    stream_reply(...)` blocks on that single `__anext__()` for up to 120s with the loop body --
+    where `_is_canceled` was checked -- never running at all. Confirmed live: repeated Stop clicks
+    all correctly set the cancel flag and were logged, but had nothing to interrupt. Races each
+    `__anext__()` against a short poll instead, yielding `None` on each cancellation check so the
+    caller can bail without waiting for an actual chunk; the underlying generator (and its
+    network connection) is closed via `aclose()` once canceled, rather than left to run to
+    completion in the background."""
+    it = stream.__aiter__()
+    pending: asyncio.Task[str] | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            if _is_canceled(ws_id, thread_id, correlation_id):
+                yield None
+                return
+            try:
+                chunk = await asyncio.wait_for(asyncio.shield(pending), timeout=STREAM_CANCEL_POLL_SECONDS)
+            except asyncio.TimeoutError:
+                continue
+            except StopAsyncIteration:
+                return
+            pending = None
+            yield chunk
+    finally:
+        # `pending` (the inner generator's in-flight __anext__()) must be fully unwound before
+        # aclose() -- calling aclose() while that task is still suspended mid-await inside the
+        # generator raises "aclose(): asynchronous generator is already running" (confirmed live).
+        if pending is not None:
+            pending.cancel()
+            try:
+                await pending
+            except (asyncio.CancelledError, StopAsyncIteration, Exception):
+                pass
+        try:
+            await stream.aclose()
+        except RuntimeError:
+            pass
 
 
 SANDBOX_POLL_SECONDS = 0.5
@@ -190,11 +245,16 @@ async def _run_one_reply_round(*, api_key: str, system: str, convo: list[dict[st
     stop_reason_sink: dict[str, str] = {}
     text = ""
     messages_sent = list(convo)
-    async for chunk in aiproxy.stream_reply(
-        api_key=api_key, model=persona.model, system=system, messages=convo,
-        max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
-        tool_use_sink=tool_use_sink, stop_reason_sink=stop_reason_sink,
+    async for chunk in _cancelable_chunks(
+        aiproxy.stream_reply(
+            api_key=api_key, model=persona.model, system=system, messages=convo,
+            max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
+            tool_use_sink=tool_use_sink, stop_reason_sink=stop_reason_sink,
+        ),
+        ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id,
     ):
+        if chunk is None or _is_canceled(ws_id, thread_id, correlation_id):
+            break
         text += chunk
         emit_ephemeral("persona.reply.delta", ws_id=ws_id, actor=("persona", persona.slug), user_id=None,
                       correlation_id=correlation_id, payload={"thread_id": thread_id, "text": chunk})
@@ -408,12 +468,15 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                 stop_reason_sink: dict[str, str] = {}
                 round_text = ""
                 messages_sent = list(convo)
-                async for chunk in aiproxy.stream_reply(
-                    api_key=api_key, model=persona.model, system=system, messages=convo,
-                    max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
-                    tool_use_sink=tool_use_sink, stop_reason_sink=stop_reason_sink,
+                async for chunk in _cancelable_chunks(
+                    aiproxy.stream_reply(
+                        api_key=api_key, model=persona.model, system=system, messages=convo,
+                        max_tokens=MAX_REPLY_TOKENS, usage_sink=round_usage, tools=_ALL_TOOLS or None,
+                        tool_use_sink=tool_use_sink, stop_reason_sink=stop_reason_sink,
+                    ),
+                    ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id,
                 ):
-                    if _is_canceled(ws_id, thread_id, correlation_id):
+                    if chunk is None or _is_canceled(ws_id, thread_id, correlation_id):
                         canceled = True
                         break
                     round_text += chunk
