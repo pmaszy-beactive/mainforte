@@ -103,13 +103,23 @@ async def _run_sandboxed_tool(*, tool_name: str, tool_input: dict[str, Any], ws_
                                correlation_id: str, thread_id: str | None, persona_id: str,
                                tool_use_id: str) -> dict[str, Any]:
     """Dispatches to the `work` queue and polls the Celery result backend (Redis) rather than
-    blocking this chat-queue worker thread — same non-blocking-poll rhythm as `_is_canceled`."""
+    blocking this chat-queue worker thread — same non-blocking-poll rhythm as `_is_canceled`.
+
+    This poll loop used to have NO cancel check at all -- a Stop click arriving while a sandboxed
+    tool (bash, browser_*) was running had nothing to interrupt: it would sit here for up to
+    SANDBOX_MAX_WAIT_SECONDS (90s) regardless of the Redis cancel flag, and the caller's own
+    round-loop never re-checked cancellation around tool processing either, so after the wait it
+    would just continue to the next LLM round. Confirmed live: a user's repeated Stop clicks all
+    correctly set the cancel flag and emitted cancel_requested, but the reply never actually
+    stopped because nothing downstream of the tool dispatch was listening for it."""
     async_result = run_tool.delay(
         tool_name=tool_name, tool_input=tool_input, ws_id=ws_id, correlation_id=correlation_id,
         thread_id=thread_id, persona_id=persona_id, tool_use_id=tool_use_id,
     )
     waited = 0.0
     while not async_result.ready():
+        if _is_canceled(ws_id, thread_id, correlation_id):
+            return {"ok": False, "error": "canceled", "tool_use_id": tool_use_id, "canceled": True}
         if waited >= SANDBOX_MAX_WAIT_SECONDS:
             return {"ok": False, "error": f"tool {tool_name!r} did not complete within "
                                            f"{SANDBOX_MAX_WAIT_SECONDS}s", "tool_use_id": tool_use_id}
@@ -466,6 +476,14 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                             correlation_id=correlation_id, thread_id=thread_id, persona_id=persona.id,
                             tool_use_id=tu.id,
                         )
+                        if outcome.get("canceled"):
+                            # Stop was clicked while this sandboxed tool was still running on the
+                            # work queue -- don't emit tool.ended/tool.error (the tool itself may
+                            # still be running; this just stops waiting on it) and don't feed a
+                            # result back to the model for another round. Any other in-flight tool
+                            # calls in this same round are skipped too, same reasoning.
+                            canceled = True
+                            break
                         if outcome.get("ok"):
                             result = outcome["result"]
                             with db_session() as db:
@@ -521,6 +539,8 @@ async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, p
                                           "name": tu.name, "message": str(e)})
                         tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "is_error": True,
                                               "content": str(e)})
+                if canceled:
+                    break
                 convo.append({"role": "user", "content": tool_results})
             else:
                 log.warning("persona=%s hit MAX_TOOL_ROUNDTRIPS=%d without a final reply", persona.slug,
