@@ -416,9 +416,40 @@ def _commit_dirty_site_scratches(ws_id: str, correlation_id: str) -> None:
                 site_source.discard_scratch(site_id, correlation_id)
 
 
+REPLY_HARD_TIMEOUT_SECONDS = 300
+
+# Every individual blocking call in _run_reply_inner (the LLM stream, a sandboxed tool wait, the
+# governor's grounding/correction calls) has its own cancellation check or its own timeout -- but
+# that's cancel-on-request (the user has to click Stop, and the check has to actually be reachable)
+# and per-call bounds, not a hard ceiling on the turn as a whole. Confirmed live: even after fixing
+# the two known uncancelable waits (16cc1d7, e1e057a), a reply still hung for 30+ minutes -- well
+# past every individual timeout in this file -- with Stop clicks having nothing to interrupt. Rather
+# than keep patching individual blocking points one at a time, this wraps the entire turn in one
+# hard deadline: whatever hangs, known or not-yet-found, the task is force-terminated here and the
+# reply is always resolved to some terminal event, instead of leaving the client's "Thinking..."/
+# Stop state stuck indefinitely.
 async def run_reply(*, ws_id: str, thread_id: str | None, correlation_id: str, persona: Persona,
                      api_key: str | None, history: list[dict[str, Any]], user_text: str,
                      user: User | None = None) -> None:
+    try:
+        await asyncio.wait_for(
+            _run_reply_inner(ws_id=ws_id, thread_id=thread_id, correlation_id=correlation_id,
+                              persona=persona, api_key=api_key, history=history, user_text=user_text, user=user),
+            timeout=REPLY_HARD_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        log.error("persona reply hard-timeout persona=%s thread=%s corr=%s after %ss",
+                   persona.slug, thread_id, correlation_id, REPLY_HARD_TIMEOUT_SECONDS)
+        with db_session() as db:
+            emit(db, "persona.reply.error", ws_id=ws_id, actor=("persona", persona.slug),
+                 correlation_id=correlation_id,
+                 payload={"thread_id": thread_id, "persona_id": persona.id,
+                          "message": f"timed out after {REPLY_HARD_TIMEOUT_SECONDS}s"})
+
+
+async def _run_reply_inner(*, ws_id: str, thread_id: str | None, correlation_id: str, persona: Persona,
+                            api_key: str | None, history: list[dict[str, Any]], user_text: str,
+                            user: User | None = None) -> None:
     arche = catalog.get(persona.slug)
     base = arche.system_prompt if arche else "You are a helpful assistant."
     # Durable (not emit_ephemeral) so a client that remounts mid-reply -- navigating away and back,
