@@ -47,6 +47,7 @@ celery.conf.update(
         "refresh-due-widgets": {"task": "mainforte.tasks.system.refresh_due_widgets", "schedule": 300.0},
         "reconcile-subscriptions": {"task": "mainforte.tasks.billing.reconcile_subscriptions", "schedule": 3600.0},
         "sweep-stuck-tasks": {"task": "mainforte.tasks.healing.sweep_stuck_tasks", "schedule": 120.0},
+        "sweep-stuck-replies": {"task": "mainforte.tasks.healing.sweep_stuck_replies", "schedule": 120.0},
         "refresh-due-tasks": {"task": "mainforte.tasks.system.refresh_due_tasks", "schedule": 60.0},
         "reconcile-agent-workers": {"task": "mainforte.tasks.system.reconcile_agent_workers", "schedule": 60.0},
     },

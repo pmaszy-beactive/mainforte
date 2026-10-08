@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 MAX_STAGE_RETRIES = 5
 STUCK_TASK_STALENESS = timedelta(minutes=10)
+STUCK_REPLY_STALENESS = timedelta(minutes=10)
 
 # A stage failure whose error text matches one of these is treated as transient (worth retrying
 # with backoff). Anything else -- broken stage config, unknown tool name, bad input -- is terminal:
@@ -97,3 +98,73 @@ def sweep_stuck_tasks() -> int:
     for task in resumed:
         run_task_stage.delay(task_id=task.id, ws_id=task.ws_id)
     return len(resumed)
+
+
+@celery.task(name="mainforte.tasks.healing.sweep_stuck_replies")
+def sweep_stuck_replies() -> int:
+    """Same class of problem as sweep_stuck_tasks, for persona replies: `persona.reply.started` is
+    emitted durably (router.py's run_reply, T02775), then the reply runs inside that same Celery
+    task. `task_acks_late`/`task_reject_on_worker_lost` (celery_app.py) are meant to redeliver the
+    task if its worker dies mid-run -- but confirmed live, this doesn't always happen (connection/
+    channel torn down along with the worker during a redeploy, not just the task becoming
+    unacked), and run_reply's own 300s hard timeout (f8ddba3) only protects a task that's still
+    alive in a living process; it does nothing if the process itself is gone. The result: a
+    `started` with no matching `ended`/`canceled`/`error` ever arriving, which the client reads as
+    "Thinking..." forever -- Stop has nothing left to cancel (no task is running anywhere; the Jobs
+    admin view and Workers' "current job" both confirm idle), and the composer stays locked since
+    `streaming` never clears. Unlike sweep_stuck_tasks, there's no cheap resume here (the original
+    `history`/`user_text` aren't persisted anywhere by id, only passed in-memory) -- this sweep
+    just resolves the orphaned reply to an error so the client unblocks, rather than re-running the
+    LLM call from scratch and risking a duplicate reply."""
+    cutoff = utcnow() - STUCK_REPLY_STALENESS
+    # Lower-bounded too: without it, this re-scans every `started` ever orphaned, forever, even
+    # long after each one's been resolved -- growing the scan on every tick as events accumulate.
+    # No real reply is still unresolved a day later; anything that old and still open already got
+    # (or will get) caught by an earlier tick and is just waiting out its own TTL on old-event
+    # cleanup (sweep_old_events), not something this sweep needs to keep re-checking.
+    lookback = utcnow() - timedelta(days=1)
+    resolved = 0
+    with db_session() as db:
+        started_rows = (
+            db.query(Event)
+            .filter(Event.type == "persona.reply.started", Event.ts < cutoff, Event.ts >= lookback)
+            .order_by(Event.id.asc())
+            .all()
+        )
+        for started in started_rows:
+            persona_id = (started.payload or {}).get("persona_id")
+            thread_id = (started.payload or {}).get("thread_id")
+            if not started.correlation_id or not persona_id:
+                continue
+            terminal = (
+                db.query(Event.id)
+                .filter(
+                    Event.correlation_id == started.correlation_id,
+                    Event.type.in_(("persona.reply.ended", "persona.reply.canceled", "persona.reply.error")),
+                    Event.id > started.id,
+                )
+                .first()
+            )
+            if terminal is not None:
+                continue
+            # A later `started` for the same (correlation_id, persona_id) means a fresh attempt
+            # already superseded this one (e.g. a retried message) -- only the most recent attempt
+            # needs resolving, not every stale `started` that preceded it.
+            newer_started = (
+                db.query(Event.id)
+                .filter(
+                    Event.type == "persona.reply.started", Event.correlation_id == started.correlation_id,
+                    Event.id > started.id,
+                )
+                .first()
+            )
+            if newer_started is not None:
+                continue
+            emit(db, "persona.reply.error", ws_id=started.ws_id, actor=("system", None),
+                 correlation_id=started.correlation_id,
+                 payload={"thread_id": thread_id, "persona_id": persona_id,
+                          "message": "reply worker was lost before this finished"})
+            log.warning("sweep_stuck_replies: resolved orphaned reply corr=%s persona=%s started_at=%s",
+                        started.correlation_id, persona_id, started.ts.isoformat())
+            resolved += 1
+    return resolved
