@@ -232,6 +232,7 @@
     "discard": "supprimer",
     "stop": "Arrêter",
     "canceled": "annulé",
+    "replyFailed": "échec de la réponse",
     "attach": "Joindre un fichier",
     "removeAttachment": "Retirer la pièce jointe",
     "dropHint": "Déposez des fichiers pour les joindre",

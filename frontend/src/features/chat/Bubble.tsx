@@ -34,7 +34,7 @@ export function Bubble({ bubble }: { bubble: BubbleT }) {
           "max-w-[78%] rounded-bubble px-4 py-2.5 text-sm leading-relaxed transition-opacity",
           mine ? "rounded-br-md bg-ember-500 text-ink-950 shadow-glow" : "rounded-bl-md bg-ink-700/80 text-fog-100 ring-1 ring-white/5",
           local && local.status !== "sent" && "opacity-80",
-          bubble.canceled && "ring-1 ring-red-500/30",
+          (bubble.canceled || bubble.error) && "ring-1 ring-red-500/30",
         )}
       >
         {!mine && <div className="mb-0.5 text-[11px] font-medium text-fog-500">{name}</div>}
@@ -63,6 +63,7 @@ export function Bubble({ bubble }: { bubble: BubbleT }) {
         <div className={cn("mt-1 flex items-center gap-2 text-[10px]", mine ? "text-ink-900/70" : "text-fog-700")}>
           <span>{f.time(bubble.ts)}</span>
           {bubble.canceled && <span className="text-red-300">{t("chat.canceled")}</span>}
+          {bubble.error && <span className="text-red-300" title={bubble.error}>{t("chat.replyFailed")}</span>}
           {local && <LocalStatus clientMsgId={bubble.clientMsgId!} status={local.status} error={local.error} />}
           {!bubble.streaming && bubble.activity.length > 0 && (
             <button onClick={() => setStepsOpen((v) => !v)} className="ml-auto flex items-center gap-1 ring-focus rounded-md" aria-expanded={stepsOpen}>

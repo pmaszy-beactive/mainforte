@@ -232,6 +232,7 @@
     "discard": "discard",
     "stop": "Stop",
     "canceled": "canceled",
+    "replyFailed": "reply failed",
     "attach": "Attach a file",
     "removeAttachment": "Remove attachment",
     "dropHint": "Drop files to attach",
