@@ -17,6 +17,10 @@ export interface Bubble {
   ts: string;
   streaming: boolean;
   canceled: boolean;
+  /** Set from persona.reply.error's message -- distinct from `local.error` (an outbox/send
+   * failure before the message ever reached the server); this is the server-side reply itself
+   * failing after a chat.message.created was accepted. */
+  error: string | null;
   clientMsgId: string | null;
   correlationId: string | null;
   attachments: Attachment[];
@@ -73,6 +77,7 @@ function applyEvent(state: State, ev: WsEvent): State {
         ts: ev.ts,
         streaming: false,
         canceled: false,
+        error: null,
         clientMsgId: p.client_msg_id ?? null,
         correlationId: ev.correlation_id,
         attachments: p.attachments ?? [],
@@ -83,14 +88,23 @@ function applyEvent(state: State, ev: WsEvent): State {
     case "persona.reply.started":
     case "persona.reply.delta":
     case "persona.reply.ended":
-    case "persona.reply.canceled": {
-      const p = ev.payload as unknown as ReplyPayload;
+    case "persona.reply.canceled":
+    case "persona.reply.error": {
+      const p = ev.payload as unknown as ReplyPayload & { message?: string };
       const key = streamKey(ev);
       const started = ev.type === "persona.reply.started";
       const ended = ev.type === "persona.reply.ended";
       const canceled = ev.type === "persona.reply.canceled";
+      // `persona.reply.error` used to have no case here at all -- it fell through to the generic
+      // `default` case below, which either left an existing bubble's `streaming` untouched (just
+      // appended the event to `activity`) or, worse, manufactured a brand-new bubble with
+      // `streaming: true` if none matched yet. Either way the reply-error unlocked nothing: Stop
+      // stayed on and the composer stayed locked forever, even though the server had already
+      // correctly resolved the reply -- confirmed live against real event history where the
+      // backend errored out in under 2 seconds but the client showed "Thinking..." for days.
+      const errored = ev.type === "persona.reply.error";
       const idx = state.bubbles.findIndex((b) => b.id === key || (ended && b.id === ev.id));
-      const activity = canceled ? pushActivity(state.activity, ev) : state.activity;
+      const activity = canceled || errored ? pushActivity(state.activity, ev) : state.activity;
       if (idx === -1) {
         if (canceled) return { ...state, seen, activity };
         // `started` is now durable (ticket T02775) specifically so this branch can fire on REST
@@ -106,8 +120,12 @@ function applyEvent(state: State, ev: WsEvent): State {
           userId: ev.user_id,
           text: started ? "" : (p.text ?? ""),
           ts: ev.ts,
-          streaming: !ended,
+          // An error with no prior `started` in the loaded window (e.g. replayed well after the
+          // fact) has nothing in-flight to show as streaming -- unlike `started` with no match,
+          // which legitimately IS still in flight.
+          streaming: !ended && !errored,
           canceled: false,
+          error: errored ? (p.message ?? "") : null,
           clientMsgId: null,
           correlationId: ev.correlation_id,
           attachments: [],
@@ -123,6 +141,8 @@ function applyEvent(state: State, ev: WsEvent): State {
         next = { ...cur, text: p.text ? p.text : cur.text, streaming: false, ts: ev.ts };
       } else if (canceled) {
         next = { ...cur, streaming: false, canceled: true };
+      } else if (errored) {
+        next = { ...cur, streaming: false, error: p.message ?? "" };
       } else {
         if (!cur.streaming) return { ...state, seen }; // late delta after end/cancel
         next = { ...cur, text: cur.text + (p.text ?? "") };
@@ -173,6 +193,7 @@ function applyEvent(state: State, ev: WsEvent): State {
           ts: ev.ts,
           streaming: true,
           canceled: false,
+          error: null,
           clientMsgId: null,
           correlationId: ev.correlation_id,
           attachments: [],

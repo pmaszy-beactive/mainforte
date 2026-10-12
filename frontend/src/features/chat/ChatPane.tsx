@@ -41,6 +41,7 @@ export function ChatPane({ workspaceId }: { workspaceId: string | null }) {
         ts: m.created_at,
         streaming: false,
         canceled: false,
+        error: null,
         clientMsgId: m.client_msg_id,
         correlationId: null,
         attachments: m.attachments.map((a) => ({ id: a.id ?? a.localId, key: a.key ?? "", name: a.name, content_type: a.content_type, size: a.size, url: a.url ?? "", localId: a.localId })),
