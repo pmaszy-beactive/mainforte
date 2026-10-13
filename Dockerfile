@@ -5,6 +5,15 @@ WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile || pnpm install
 COPY frontend/ ./
+# Vite inlines import.meta.env.VITE_* into the built JS at `pnpm build` time -- there is no
+# runtime env var that can reach it later, so these must be passed as --build-arg to `docker
+# build` (ticket T02749: Save Card silently did nothing because this image was always built
+# with VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY unset, so stripePromise is null in every deployed
+# build, not just this dev machine).
+ARG VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY
+ARG VITE_API_URL
+ENV VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY=${VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm build
 
 # ---- api ----

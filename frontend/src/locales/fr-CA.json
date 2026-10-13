@@ -243,6 +243,8 @@
     "uploadRetry": "Réessayer le téléversement",
     "tooLarge": "Trop volumineux (max 25 Mo)",
     "attachmentLost": "Pièce jointe perdue après le rechargement",
+    "offline": "Hors ligne, nouvelle tentative à venir",
+    "offlineWillRetry": "Vous êtes hors ligne. Ce message sera envoyé automatiquement dès que vous serez de nouveau en ligne.",
     "closeLightbox": "Fermer",
     "taskBlockedPlaceholder": "Tapez votre réponse…",
     "taskBlockedSubmit": "Envoyer"

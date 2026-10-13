@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { UploadResult } from "@/lib/types";
+import { useAttachments } from "./attachments";
 
 export type OutboxStatus = "queued" | "sending" | "sent" | "failed";
 
@@ -51,7 +52,22 @@ export const useOutbox = create<OutboxState>()(
         })),
       update: (id, patch) => set((s) => ({ messages: s.messages.map((m) => (m.client_msg_id === id ? { ...m, ...patch } : m)) })),
       remove: (id) => set((s) => (s.messages.some((m) => m.client_msg_id === id) ? { messages: s.messages.filter((m) => m.client_msg_id !== id) } : s)),
-      retry: (id) => set((s) => ({ messages: s.messages.map((m) => (m.client_msg_id === id ? { ...m, status: "queued", error: null } : m)) })),
+      retry: (id) =>
+        set((s) => {
+          // Flipping status back to "queued" alone only works for a message that failed with no
+          // attachments, or whose attachments already finished uploading -- sender.ts's nextReady()
+          // re-checks every attachment's upload status on each pass, so a message that failed
+          // because an attachment upload itself failed (status "failed" in useAttachments, not
+          // merely missing) was immediately re-failed with the same error the instant the sender
+          // looked at it again: same text, same buttons, nothing visibly happens (ticket T02797).
+          // Retrying the message must also retry any attachment that's actually retryable.
+          const msg = s.messages.find((m) => m.client_msg_id === id);
+          if (msg) {
+            const attachRetry = useAttachments.getState().retry;
+            for (const a of msg.attachments) if (!a.id) attachRetry(a.localId);
+          }
+          return { messages: s.messages.map((m) => (m.client_msg_id === id ? { ...m, status: "queued", error: null } : m)) };
+        }),
       attachUploaded: (localId, r) =>
         set((s) => ({
           messages: s.messages.map((m) =>

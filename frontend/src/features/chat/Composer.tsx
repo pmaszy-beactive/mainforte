@@ -22,6 +22,12 @@ interface Props {
 
 const ACCEPT = "image/*,video/*,text/*,.pdf,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip";
 const DRAFT_SAVE_DEBOUNCE_MS = 1500;
+// Generous ceiling for the POST + Celery dispatch + event emit + socket round trip that flips
+// `streaming` true. Without a bounded fallback, a workspace with no active persona in its roster
+// (route_message's `if not roster: return`) never emits persona.reply.started at all -- streaming
+// would never flip true and justSent would lock the composer shut forever after the very first
+// message, which is worse than the bug it's fixing.
+const JUST_SENT_TIMEOUT_MS = 10_000;
 
 export function Composer({ workspaceId, threadId, draftKey, streaming, stopping, onStop, onSend }: Props) {
   const { t } = useTranslation();
@@ -38,6 +44,7 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
   const disabled = !workspaceId;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const limitHitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const justSentTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Fetch-on-mount server backstop: only seeds the draft when this device has nothing local yet,
   // so a stale/older server value never clobbers an in-progress local edit.
@@ -71,10 +78,18 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
   }, [text]);
 
   // Bridge the gap between hitting Enter and `streaming` flipping true (event-stream
-  // round-trip): without this the Send button gives no feedback for a beat.
+  // round-trip): without this the Send button gives no feedback for a beat, and (since T02788)
+  // canSend would otherwise let a second Enter through during that same window.
   useEffect(() => {
-    if (streaming) setJustSent(false);
+    if (streaming) {
+      setJustSent(false);
+      if (justSentTimer.current) clearTimeout(justSentTimer.current);
+    }
   }, [streaming]);
+
+  useEffect(() => () => {
+    if (justSentTimer.current) clearTimeout(justSentTimer.current);
+  }, []);
 
   const addFiles = (files: FileList | File[] | null | undefined) => {
     if (!workspaceId || !files) return;
@@ -93,8 +108,15 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
   const uploading = localIds.some((id) => items[id]?.status === "uploading");
   // The Send button itself is swapped for Stop while streaming (below), but the textarea stays
   // enabled and Enter still called submit() regardless -- canSend must also gate on `streaming`
-  // so pressing Enter during a reply can't queue a second message (ticket T02788).
-  const canSend = !disabled && !uploading && !streaming && (text.trim().length > 0 || localIds.length > 0);
+  // so pressing Enter during a reply can't queue a second message (ticket T02788). That alone
+  // still leaves a real gap: `streaming` only flips true once persona.reply.started round-trips
+  // back over the websocket (POST + Celery dispatch + event emit + socket delivery), so there's
+  // a genuine window right after hitting Enter where streaming is still false. `justSent` was
+  // already built to bridge exactly that window (it's set synchronously in submit() and only
+  // cleared once streaming goes true) but was wired only into the Send button's `disabled` --
+  // irrelevant once the button swaps to Stop, and Enter never looked at it at all, so a second
+  // Enter press inside that window still queued a second message every time.
+  const canSend = !disabled && !uploading && !streaming && !justSent && (text.trim().length > 0 || localIds.length > 0);
 
   const submit = () => {
     if (!canSend) return;
@@ -104,6 +126,8 @@ export function Composer({ workspaceId, threadId, draftKey, streaming, stopping,
     if (workspaceId) api.drafts.save(workspaceId, threadId, "").catch(() => {});
     setLocalIds([]);
     setJustSent(true);
+    if (justSentTimer.current) clearTimeout(justSentTimer.current);
+    justSentTimer.current = setTimeout(() => setJustSent(false), JUST_SENT_TIMEOUT_MS);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
