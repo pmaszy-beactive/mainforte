@@ -243,6 +243,8 @@
     "uploadRetry": "Retry upload",
     "tooLarge": "Too large (max 25 MB)",
     "attachmentLost": "Attachment lost after reload",
+    "offline": "Offline, will retry",
+    "offlineWillRetry": "You're offline. This message will send automatically once you're back online.",
     "closeLightbox": "Close",
     "taskBlockedPlaceholder": "Type your response…",
     "taskBlockedSubmit": "Submit"

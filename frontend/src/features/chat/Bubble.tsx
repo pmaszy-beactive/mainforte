@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { AlertCircle, Check, ChevronDown, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Loader2, Trash2, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Bubble as BubbleT } from "@/hooks/useEventStream";
 import { useFormat } from "@/hooks/useFormat";
 import { useOutbox, type OutboxStatus } from "@/stores/outbox";
 import { kickSender } from "@/lib/sender";
+import { useOnline } from "@/hooks/useOnline";
 import { cn } from "@/lib/cn";
 import { BubbleAttachments } from "./BubbleAttachments";
 import { ActivityList } from "./ActivityList";
@@ -82,28 +83,47 @@ function LocalStatus({ clientMsgId, status, error }: { clientMsgId: string; stat
   const { t } = useTranslation();
   const retry = useOutbox((s) => s.retry);
   const remove = useOutbox((s) => s.remove);
+  const online = useOnline();
   if (status === "sent") return <Check className="size-3" aria-label={t("chat.sent")} />;
   if (status === "failed") {
+    // A reload drops the in-memory File behind an attachment (useAttachments isn't persisted) --
+    // there is no upload left to retry, ever, so offering Retry here always silently no-ops
+    // (ticket T02797). uploadFailed and a plain send failure are genuinely retryable (outbox.ts's
+    // retry() now also re-runs any attachment whose upload itself failed).
+    const retryable = error !== "attachmentLost";
     const reason = error === "attachmentLost" ? t("chat.attachmentLost") : error === "uploadFailed" ? t("chat.uploadFailed") : error;
     return (
       <span className="inline-flex items-center gap-1.5 text-red-300">
         <AlertCircle className="size-3" />
         <span title={reason ?? undefined}>{t("chat.failed")}</span>
-        <button
-          className="font-semibold underline underline-offset-2 ring-focus rounded-sm hover:text-red-100"
-          onClick={() => {
-            retry(clientMsgId);
-            kickSender();
-          }}
-        >
-          {t("chat.retry")}
-        </button>
+        {retryable && (
+          <button
+            className="font-semibold underline underline-offset-2 ring-focus rounded-sm hover:text-red-100"
+            onClick={() => {
+              retry(clientMsgId);
+              kickSender();
+            }}
+          >
+            {t("chat.retry")}
+          </button>
+        )}
         <button
           className="inline-flex items-center gap-0.5 underline underline-offset-2 ring-focus rounded-sm hover:text-red-100"
           onClick={() => remove(clientMsgId)}
         >
           <Trash2 className="size-3" /> {t("chat.discard")}
         </button>
+      </span>
+    );
+  }
+  // "queued"/"sending" render identically while offline -- sender.ts retries with backoff
+  // forever rather than ever marking the message failed, which is correct (connectivity is the
+  // only problem), but with no visible distinction the message just looked permanently stuck
+  // with no explanation (ticket T02797 follow-up). Surface the real cause instead of a bare spinner.
+  if (!online) {
+    return (
+      <span className="inline-flex items-center gap-1 text-ember-300" title={t("chat.offlineWillRetry")}>
+        <WifiOff className="size-3" /> {t("chat.offline")}
       </span>
     );
   }
