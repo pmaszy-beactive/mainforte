@@ -19,7 +19,14 @@ import { CreditCard } from "lucide-react";
 
 const stripePromise = (() => {
   const key = import.meta.env.VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY as string | undefined;
-  return key ? loadStripe(key) : null;
+  if (!key) {
+    // Vite inlines this at build time (ticket T02749) -- a missing key here means the image
+    // this app was built from never received --build-arg VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+    // not a runtime/user-environment problem. Loud and findable beats silent.
+    console.error("VITE_PUBLIC_STRIPE_PUBLISHABLE_KEY was not set at build time -- Save Card will show as unavailable");
+    return null;
+  }
+  return loadStripe(key);
 })();
 
 const STATUS_TONE: Record<string, "success" | "info" | "error"> = {
