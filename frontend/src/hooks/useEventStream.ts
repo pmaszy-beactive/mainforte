@@ -182,6 +182,17 @@ function applyEvent(state: State, ev: WsEvent): State {
       const key = streamKey(ev);
       const idx = state.bubbles.findIndex((b) => b.id === key);
       if (idx === -1) {
+        // Only a `persona` actor can plausibly own a reply bubble that just hasn't arrived yet
+        // (e.g. a tool/task sub-step racing ahead of its own persona.reply.started). Audit/
+        // bookkeeping events like billing.usage.recorded carry the reply's correlation_id for
+        // traceability but fire with actor_type "system" (or similarly "user" for things like
+        // persona.reply.cancel_requested) -- their streamKey can never match the real reply
+        // bubble, and nothing ever arrives afterward to resolve a fabricated one. Routing them
+        // through this fabrication path created a second, permanently-streaming "?" bubble that
+        // kept the Stop button stuck on even after the real reply had already ended cleanly
+        // (confirmed live: billing.usage.recorded for governor.extract landed moments before/after
+        // persona.reply.ended on the same correlation_id). Record it as activity only.
+        if (ev.actor.type !== "persona") return { ...state, seen, activity };
         const p = ev.payload as { thread_id?: string };
         const b: Bubble = {
           id: key,
